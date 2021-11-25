@@ -115,7 +115,7 @@ def train_td3_rnn(function: functions_core.Function,
   act_spec = tf_env_training.action_spec()
 
   if actor_layers is None:
-    actor_layers = [400, 300]
+    actor_layers = [256, 256]
 
   if actor_lstm_size is None:
     actor_lstm_size = [40]
@@ -125,12 +125,12 @@ def train_td3_rnn(function: functions_core.Function,
   actor_network = actor_rnn_net.ActorRnnNetwork(
     input_tensor_spec=obs_spec,
     output_tensor_spec=act_spec,
-    input_fc_layer_params=actor_layers,
     lstm_size=actor_lstm_size,
+    output_fc_layer_params=actor_layers,
     activation_fn=actor_activation_fn)
 
   if critic_joint_layers is None:
-    critic_joint_layers = [300]
+    critic_joint_layers = [256, 256]
 
   if critic_lstm_size is None:
     critic_lstm_size = [40]
@@ -140,10 +140,7 @@ def train_td3_rnn(function: functions_core.Function,
 
   critic_network = critic_rnn_net.CriticRnnNetwork(
     input_tensor_spec=(obs_spec, act_spec),
-    observation_fc_layer_params=(400,),
-    action_fc_layer_params=critic_action_layers,
-    joint_fc_layer_params=critic_joint_layers,
-    output_fc_layer_params=(100,),
+    output_fc_layer_params=critic_joint_layers,
     lstm_size=critic_lstm_size)
 
   actor_optimizer = tf.keras.optimizers.Adam(learning_rate=actor_lr)
@@ -311,4 +308,4 @@ def train_td3_rnn(function: functions_core.Function,
 
 
 if __name__ == '__main__':
-  train_td3_rnn(npf.Ackley(), 2)
+  train_td3_rnn(npf.SumSquares(), 2)
