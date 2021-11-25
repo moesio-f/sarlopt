@@ -170,10 +170,10 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
   # Quantidade máxima de interações agente-ambiente.
   MAX_STEPS: int = 2000
   # String's para as chaves das observações (dictionary)
-  OBJECTIVE_VALUE_STR: str = "objective_value"
   GRADIENT_STR: str = "gradient"
-  POSITION_DELTA_STR: str = "position_delta"
+  OBJECTIVE_VALUE_STR: str = "objective_value"
   OBJECTIVE_VALUE_DELTA_STR: str = "objective_value_delta"
+  POSITION_DELTA_STR: str = "position_delta"
 
   def __init__(self,
                function: core.Function,
@@ -214,7 +214,7 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
       size=(self._dims,),
       low=self._fn.domain.min,
       high=self._fn.domain.max)
-    self._best_position: np.ndarray = self._position.copy()
+    self._best_position: np.ndarray = self._position
     self._objective_value: np.ndarray = np.array([self._fn(self._position)],
                                                  dtype=self._float_dtype)
     self._best_value: np.ndarray = self._objective_value
@@ -223,23 +223,22 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
     # Specs
     self._action_spec = array_spec.BoundedArraySpec(shape=(self._dims,),
                                                     dtype=self._float_dtype,
-                                                    minimum=-action_min,
+                                                    minimum=action_min,
                                                     maximum=action_max,
                                                     name='action')
-
     self._observation_spec = {
+      PyFunctionEnvV1.GRADIENT_STR: array_spec.ArraySpec(
+        shape=(self._dims,),
+        dtype=self._float_dtype),
       PyFunctionEnvV1.OBJECTIVE_VALUE_STR: array_spec.ArraySpec(
         shape=(1,),
         dtype=self._float_dtype),
-      PyFunctionEnvV1.GRADIENT_STR: array_spec.ArraySpec(
-        shape=(self._dims,),
+      PyFunctionEnvV1.OBJECTIVE_VALUE_DELTA_STR: array_spec.ArraySpec(
+        shape=(1,),
         dtype=self._float_dtype),
       PyFunctionEnvV1.POSITION_DELTA_STR: array_spec.ArraySpec(
         shape=(self._dims,),
         dtype=self._float_dtype),
-      PyFunctionEnvV1.OBJECTIVE_VALUE_DELTA_STR: array_spec.ArraySpec(
-        shape=(1,),
-        dtype=self._float_dtype)
     }
 
   def _step(self, action):
@@ -249,8 +248,8 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
     self._steps_taken += 1
 
     new_pos = np.clip(self._position + action,
-                      self._fn.domain.min,
-                      self._fn.domain.max).astype(self._float_dtype)
+                      a_min=self._fn.domain.min,
+                      a_max=self._fn.domain.max).astype(self._float_dtype)
     new_obj_value = np.array([self._fn(new_pos)],
                              dtype=self._float_dtype)
     new_grad = self._fn_gradients(new_pos)
@@ -267,6 +266,10 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
     self._objective_value = new_obj_value
     self._gradient = new_grad
 
+    if np.all(np.less(self._objective_value, self._best_value)):
+      self._best_value = self._objective_value
+      self._best_position = self._position
+
     self._episode_ended = self._steps_taken >= PyFunctionEnv.MAX_STEPS
     if self._episode_ended:
       return ts.termination(obs, reward)
@@ -274,11 +277,13 @@ class PyFunctionEnvV1(AbstractPyFunctionEnv):
     return ts.transition(obs, reward)
 
   def _reset(self):
+    print('Best value: {0} | Best position: {1}'.format(self._best_value,
+                                                        self._best_position))
     self._position = self._rng.uniform(
       size=(self._dims,),
       low=self._fn.domain.min,
       high=self._fn.domain.max)
-    self._best_position: np.ndarray = self._position.copy()
+    self._best_position: np.ndarray = self._position
     self._objective_value: np.ndarray = np.array([self._fn(self._position)],
                                                  dtype=self._float_dtype)
     self._best_value = self._objective_value
