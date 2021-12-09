@@ -1,4 +1,4 @@
-"""Simple Evolutionary Algorithm (EA) as implemented by DEAP."""
+"""Simple Evolutionary Algorithm (EA) for Optimization."""
 
 import matplotlib.pyplot as plt
 import numpy as np
