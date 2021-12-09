@@ -1,4 +1,4 @@
-"""Funções utilitárias para o treinamento dos agentes."""
+"""Training utilities for experiments."""
 
 import os
 import json
@@ -49,7 +49,7 @@ def create_agent_dir(algorithm_name: str,
   agent_identifier = f'{algorithm_name}-{str_dims}D-{function.name}-0'
   agent_dir = os.path.join(OUTPUT_DIR, agent_identifier)
 
-  # TODO: Diminuir complexidade, atualmente O(n)
+  # TODO: Reduce time complexity.
   i = 0
   while os.path.exists(agent_dir):
     i += 1

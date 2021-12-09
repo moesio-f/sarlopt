@@ -1,4 +1,4 @@
-"""Ambiente utilizado para a minimização de funções matemáticas com RL."""
+"""PyEnvironments for function optimization with RL."""
 
 import numpy as np
 from numpy.random import default_rng
@@ -9,17 +9,17 @@ from tf_agents.typing import types
 
 from optfuncs import core
 
-# Quantidade máxima de iterações entre o agente e ambiente.
+# Maximum number of interactions between the agent and the environment.
 MAX_STEPS = 50000
 
 
 class PyFunctionEnv(py_environment.PyEnvironment):
-  """Ambiente para a minimização de função.
-  Dada uma função f: D -> I, onde D é um subconjunto de R^d
-  e I é um subconjunto de R, as especificações do ambiente são:
-    as observações (s em D) são posições do domínio;
-    as ações (a em R^d) são os possíveis passos;
-    as recompensas são r = -f(s + a).
+  """Function optimization as a MDP.
+  Given a function f: D -> I, where D is a subset of R^d
+  and I is a subset of R, the environment is described as follows:
+    observations (s in D) are position in the domain;
+    actions (a in R^d) are the step vectors;
+    rewards are calculated by r = -f(s + a).
   """
 
   def get_info(self) -> types.NestedArray:

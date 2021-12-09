@@ -1,4 +1,4 @@
-"""MORELA (MOdified REinforcement Learning Algorithm) tests."""
+"""MORELA (MOdified REinforcement Learning Algorithm) for Optimization."""
 
 import copy
 

@@ -1,4 +1,4 @@
-"""TD3-IG agent test on FunctionEnvironment."""
+"""TD3-IG for learning an optimization algorithm."""
 
 import time
 
@@ -59,18 +59,19 @@ def td3_ig_train(function: functions_core.Function,
                  summarize_grads_and_vars: bool = False):
   algorithm_name = 'TD3-IG'
 
-  # Criando o diretório do agente
+  # Creating the training/agent directory
   agent_dir = training_utils.create_agent_dir(algorithm_name,
                                               function,
                                               dims)
 
-  # Atualizando a exploração para ser determinada com base nos steps
+  # Calculating the number of exploration steps
   exploration_noise_num_steps = round(exploration_noise_num_episodes *
                                       env_steps)
 
-  # Obtendo função equivalente em TensorFlow (Utilizada no cálculo das métricas)
+  # Obtaining the function's Tensorflow implementation (Needed for metrics).
   tf_function = npf.get_tf_function(function)
 
+  # Creating the environments.
   env_training = py_fun_env.PyFunctionEnv(function=function,
                                           dims=dims,
                                           bounded_actions_spec=False)
@@ -81,11 +82,11 @@ def td3_ig_train(function: functions_core.Function,
                                       bounded_actions_spec=False)
   env_eval = wrappers.TimeLimit(env=env_eval, duration=env_eval_steps)
 
-  # Conversão para TFPyEnvironment's
+  # Conversion to TFPyEnvironment's.
   tf_env_training = tf_py_environment.TFPyEnvironment(environment=env_training)
   tf_env_eval = tf_py_environment.TFPyEnvironment(environment=env_eval)
 
-  # Criação dos SummaryWriter's
+  # Instantiating the SummaryWriter's
   print('Creating logs directories.')
   log_dir, log_eval_dir, log_train_dir = training_utils.create_logs_dir(
     agent_dir)
@@ -97,7 +98,7 @@ def td3_ig_train(function: functions_core.Function,
   eval_summary_writer = tf.compat.v2.summary.create_file_writer(
     log_eval_dir, flush_millis=summary_flush_secs * 1000)
 
-  # Criação das métricas
+  # Instantiating the metrics.
   train_metrics = [tf_metrics.AverageReturnMetric(),
                    tf_metrics.MaxReturnMetric()]
 
@@ -105,7 +106,7 @@ def td3_ig_train(function: functions_core.Function,
                   tf_custom_metrics.AverageBestObjectiveValueMetric(
                     function=tf_function, buffer_size=eval_episodes)]
 
-  # Criação do agente, redes neurais, otimizadores
+  # Agent, Neural Networks and Optimizers.
   obs_spec = tf_env_training.observation_spec()
   act_spec = tf_env_training.action_spec()
   time_spec = tf_env_training.time_step_spec()
@@ -162,7 +163,7 @@ def td3_ig_train(function: functions_core.Function,
 
   agent.initialize()
 
-  # Criação do Replay Buffer e drivers
+  # Creating the Replay Buffer and drivers.
   replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
     data_spec=agent.collect_data_spec,
     batch_size=tf_env_training.batch_size,
@@ -185,7 +186,7 @@ def td3_ig_train(function: functions_core.Function,
                                            observers=eval_metrics,
                                            num_episodes=eval_episodes)
 
-  # Conversão das principais funções para tf.function's
+  # Converting to tf.Function's
   initial_collect_driver.run = common.function(initial_collect_driver.run)
   driver.run = common.function(driver.run)
   eval_driver.run = common.function(eval_driver.run)
@@ -195,7 +196,7 @@ def td3_ig_train(function: functions_core.Function,
         'episodes with a collect policy.'.format(initial_collect_episodes))
   initial_collect_driver.run()
 
-  # Criação do dataset
+  # Creating the dataset
   dataset = replay_buffer.as_dataset(
     num_parallel_calls=3,
     sample_batch_size=batch_size,
@@ -203,7 +204,7 @@ def td3_ig_train(function: functions_core.Function,
 
   iterator = iter(dataset)
 
-  # Criação da função para calcular as métricas
+  # Metric evaluation function
   def compute_eval_metrics():
     return eval_utils.eager_compute(eval_metrics,
                                     eval_driver,
@@ -220,7 +221,7 @@ def td3_ig_train(function: functions_core.Function,
     experience, _ = next(iterator)
     agent.train(experience)
 
-  # Salvando hiperparâmetros antes de iniciar o treinamento
+  # Dictionary containing the hyperparameters
   hp_dict = {
     "discount": discount,
     "exploration_noise_std": exploration_noise_std,
@@ -274,7 +275,7 @@ def td3_ig_train(function: functions_core.Function,
                   training_utils.json_pretty_string(hp_dict),
                   step=0)
 
-  # Treinamento
+  # Training phase
   for ep in range(training_episodes):
     start_time = time.time()
     for _ in range(env_steps):
@@ -300,11 +301,11 @@ def td3_ig_train(function: functions_core.Function,
     print('Finished episode {0}. '
           'Delta time since last episode: {1:.2f}'.format(ep, delta_time))
 
-  # Computando métricas de avaliação uma última vez.
+  # Computing metrics after training.
   compute_eval_metrics()
 
-  # Avaliação do algoritmo aprendido (policy) em 100 episódios distintos.
-  # Produz um gráfico de convergência para o agente na função.
+  # Policy evaluation for 100 episodes.
+  # Outputs a convergence plot for the policy in the function.
   eval_utils.evaluate_agent(tf_env_eval,
                             agent.policy,
                             function,
@@ -315,8 +316,8 @@ def td3_ig_train(function: functions_core.Function,
                             episodes=100,
                             save_dir=agent_dir)
 
-  # Salvamento da policy aprendida.
-  # Pasta de saída: output/TD3-IG-{dims}D-{function.name}-{num}/policy
+  # Saving the learned policy.
+  # Output directory: output/DDPG-{dims}D-{function.name}-{num}/policy
   training_utils.save_policy(agent_dir, agent.policy)
 
 

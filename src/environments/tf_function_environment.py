@@ -1,4 +1,4 @@
-"""TFEnvironments that implement mathematical functions as environments."""
+"""TFEnvironments for function optimization with RL."""
 
 import tensorflow as tf
 from tensorflow.python.autograph.impl import api as autograph

@@ -1,4 +1,5 @@
-"""Funções utilitárias para avaliação dos algoritmos."""
+"""Evaluation utilities for experiments."""
+
 import collections
 import typing
 import csv
@@ -23,7 +24,7 @@ from src.metrics import tf_custom_metrics
 from experiments.training import utils as training_utils
 
 
-# Agrupa as informações necessárias sobre a avaliação de um baseline.
+# Baseline evaluation data.
 class BaselineEvalData(typing.NamedTuple):
   baseline_name: str
   function_name: str
@@ -181,10 +182,7 @@ def evaluate_baselines(functions: typing.List[core.Function],
                        data.avg_best_solution_iteration])
 
 
-# Parâmetros para o GD em cada função.
-# Valores escolhidos após realizar 20 testes distintos (500 iterações)
-#   e selecionando o parâmetro que obteve a melhor solução final (média).
-# Conjunto de busca: {1e-1, 1e-2, 1e-3, 1e-4}
+# GD parameters.
 gd_lrs = {'F1': 1e-1,
           'F2': 1e-2,
           'F3': 1e-4,
@@ -218,10 +216,7 @@ def GD(function: core.Function,
   return best_solutions, best_it
 
 
-# Parâmetros para o NAG em cada função.
-# Valores escolhidos após realizar 20 testes distintos e selecionando o par
-#   (lr, momentum) de parâmetros que encontraram a melhor solução final (média)
-# Conjunto de busca: {1e-1, 1e-2, 1e-3, 1e-4} X {0.5, 0.8, 0.9}
+# NAG parameters.
 nag_params = {'F1': (1e-1, 0.5),
               'F2': (1e-3, 0.5),
               'F3': (1e-4, 0.9),
