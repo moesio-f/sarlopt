@@ -37,10 +37,9 @@ class AverageBestObjectiveValueMetric(tf_metric.TFStepMetric):
                                     self._best_value)):
         self._best_value.assign(self._current_value)
 
-      # Um Trajectory sempre possui informação de 2 time_step,
-      # quando encontrar um Trajectory onde o time_step atual é o último
-      # e o próximo é o primeiro, deve-se adicionar o melhor valor encontrado
-      # durante esse episódio no buffer.
+      # Every Trajectory has information of 2 time_step's,
+      # when a boundary trajectory is found, the best value found in the
+      # episode is added to the buffer.
       if trajectory.is_boundary():
         self._buffer.add(self._best_value)
 
@@ -98,11 +97,9 @@ class ConvergenceMultiMetric(tf_metric.TFMultiMetricStepMetric):
 
     self._buffer_single_trajectory.add(self._best_value)
 
-    # Um Trajectory sempre possui informação de 2 time_step,
-    # quando encontrar um Trajectory onde o time_step atual é o último
-    # e o próximo é o primeiro, deve-se adicionar a "convergência" no buffer.
-    # OBS:. O driver de episódios só contabiliza transições que geram um novo
-    #   episódio, assim sempre teremos o "is_boundary" verdadeiro eventualmente.
+    # Every Trajectory has information of 2 time_step's,
+    # when a boundary trajectory is found, the "convergence" of the
+    # episode is added to the buffer.
     if trajectory.is_boundary():
       self._buffer.add(tf.squeeze(self._buffer_single_trajectory.data))
       self._buffer_single_trajectory.clear()
