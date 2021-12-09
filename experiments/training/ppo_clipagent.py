@@ -1,4 +1,4 @@
-"""PPO-Clip agent test on FunctionEnvironment."""
+"""PPO-Clip for learning an optimization algorithm."""
 
 import time
 
