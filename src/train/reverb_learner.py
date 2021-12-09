@@ -44,8 +44,6 @@ class ReverbLearnerPER(learner.Learner):
     self._priority_clip_min = priority_clip_min
     self._priority_clip_max = priority_clip_max
 
-    # Construir função de atualização das prioridades do dataset
-    # SampleInfo('key', 'probability', 'table_size', 'priority')
     def update_priorities(sample, loss):
       _, sample_info = sample
       td_errors = loss.extra.td_error_per_element
