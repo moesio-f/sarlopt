@@ -9,9 +9,6 @@ from tf_agents.typing import types
 
 from optfuncs import core
 
-# Maximum number of interactions between the agent and the environment.
-MAX_STEPS = 50000
-
 
 class PyFunctionEnv(py_environment.PyEnvironment):
   """Function optimization as a MDP.
@@ -22,13 +19,19 @@ class PyFunctionEnv(py_environment.PyEnvironment):
     rewards are calculated by r = -f(s + a).
   """
 
+  # Maximum number of interactions between the agent and the environment.
+  MAX_STEPS = 50000
+
   def get_info(self) -> types.NestedArray:
     return self._state
 
   def __init__(self, function: core.Function, dims,
-               bounded_actions_spec: bool = True):
+               bounded_actions_spec: bool = True,
+               seed=None):
     super().__init__()
-    self._rng = default_rng()
+    self._seed = seed if seed else np.random.SeedSequence().generate_state(1)
+    self._rng = default_rng(seed=self._seed)
+
     self.func = function
     self._dims = dims
 
@@ -77,7 +80,7 @@ class PyFunctionEnv(py_environment.PyEnvironment):
     self._state = np.clip(self._state, domain_min, domain_max)
 
     self._steps_taken += 1
-    if self._steps_taken >= MAX_STEPS:
+    if self._steps_taken >= PyFunctionEnv.MAX_STEPS:
       self._episode_ended = True
 
     obj_value = self.func(self._state)
