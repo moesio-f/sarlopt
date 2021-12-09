@@ -1,5 +1,5 @@
-"""Twin Delayed Deep Deterministic policy gradient (TD3) with Inverting Gradients
-(https://arxiv.org/abs/1511.04143) agent.
+"""Twin Delayed Deep Deterministic policy gradient (TD3) with Inverting
+Gradients (https://arxiv.org/abs/1511.04143) agent.
 
 "Addressing Function Approximation Error in Actor-Critic Methods"
 by Fujimoto et al. (https://arxiv.org/abs/1802.09477)
