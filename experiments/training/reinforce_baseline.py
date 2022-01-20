@@ -5,8 +5,6 @@ import time
 import tensorflow as tf
 from tf_agents.agents.reinforce import reinforce_agent
 from tf_agents.drivers import dynamic_episode_driver as dy_ed
-from tf_agents.environments import tf_py_environment
-from tf_agents.environments import wrappers
 from tf_agents.networks import actor_distribution_network as actor_net
 from tf_agents.networks import value_network as value_net
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
@@ -14,10 +12,9 @@ from tf_agents.train.utils import train_utils
 from tf_agents.utils import common
 from tf_agents.metrics import tf_metrics
 
-from optfuncs import numpy_functions as npf
-from optfuncs import core as functions_core
+from optfuncs import tensorflow_functions as tff
 
-from src.environments import py_function_environment as py_fun_env
+from src.environments import tf_function_environment as tf_fun_env
 from src.typing.types import LayerParam
 from src.metrics import tf_custom_metrics
 
@@ -25,8 +22,9 @@ from experiments.evaluation import utils as eval_utils
 from experiments.training import utils as training_utils
 
 
-def reinforce_train(function: functions_core.Function,
+def reinforce_train(function: tff.TensorflowFunction,
                     dims: int,
+                    seed=10000,
                     training_episodes: int = 2000,
                     stop_threshold: float = None,
                     env_steps: int = 250,
@@ -47,21 +45,15 @@ def reinforce_train(function: functions_core.Function,
                                               function,
                                               dims)
 
-  # Obtaining the function's Tensorflow implementation (Needed for metrics).
-  tf_function = npf.get_tf_function(function)
-
-  # Creating the environments.
-  env_training = py_fun_env.PyFunctionEnv(function=function,
-                                          dims=dims)
-  env_training = wrappers.TimeLimit(env=env_training, duration=env_steps)
-
-  env_eval = py_fun_env.PyFunctionEnv(function=function,
-                                      dims=dims)
-  env_eval = wrappers.TimeLimit(env=env_eval, duration=env_eval_steps)
-
   # Conversion to TFPyEnvironment's.
-  tf_env_training = tf_py_environment.TFPyEnvironment(environment=env_training)
-  tf_env_eval = tf_py_environment.TFPyEnvironment(environment=env_eval)
+  tf_env_training = tf_fun_env.TFFunctionEnv(function=function,
+                                             dims=dims,
+                                             seed=seed,
+                                             duration=env_steps)
+  tf_env_eval = tf_fun_env.TFFunctionEnv(function=function,
+                                         dims=dims,
+                                         seed=seed,
+                                         duration=env_eval_steps)
 
   # Instantiating the SummaryWriter's
   print('Creating logs directories.')
@@ -81,7 +73,7 @@ def reinforce_train(function: functions_core.Function,
 
   eval_metrics = [tf_metrics.AverageReturnMetric(buffer_size=eval_episodes),
                   tf_custom_metrics.AverageBestObjectiveValueMetric(
-                    function=tf_function, buffer_size=eval_episodes)]
+                    function=function, buffer_size=eval_episodes)]
 
   # Agent, Neural Networks and Optimizers.
   obs_spec = tf_env_training.observation_spec()
@@ -162,6 +154,7 @@ def reinforce_train(function: functions_core.Function,
 
     # Dictionary containing the hyperparameters
     hp_dict = {
+      "seed": seed,
       "discount": discount,
       "training_episodes": training_episodes,
       "stop_threshold": stop_threshold,
@@ -242,7 +235,7 @@ def reinforce_train(function: functions_core.Function,
 
 
 if __name__ == '__main__':
-  reinforce_train(npf.Sphere(), 2,
+  reinforce_train(tff.Sphere(), 2,
                   stop_threshold=1e-2,
                   eval_interval=10,
                   training_episodes=500,
