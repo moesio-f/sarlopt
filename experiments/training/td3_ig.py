@@ -2,23 +2,19 @@
 
 import time
 
-import numpy as np
 import tensorflow as tf
 from tf_agents.agents.ddpg import critic_network as critic_net
 from tf_agents.drivers import dynamic_step_driver as dy_sd
 from tf_agents.drivers import dynamic_episode_driver as dy_ed
-from tf_agents.environments import tf_py_environment
-from tf_agents.environments import wrappers
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.train.utils import train_utils
 from tf_agents.utils import common
 from tf_agents.metrics import tf_metrics
 
-from optfuncs import numpy_functions as npf
-from optfuncs import core as functions_core
+from optfuncs import tensorflow_functions as tff
 
 from src.agents import td3_inverting_gradients as td3_ig
-from src.environments import py_function_environment as py_fun_env
+from src.environments import tf_function_environment as tf_fun_env
 from src.networks import linear_actor_network as linear_actor_net
 from src.typing.types import LayerParam
 from src.metrics import tf_custom_metrics
@@ -27,8 +23,9 @@ from experiments.evaluation import utils as eval_utils
 from experiments.training import utils as training_utils
 
 
-def td3_ig_train(function: functions_core.Function,
+def td3_ig_train(function: tff.TensorflowFunction,
                  dims: int,
+                 seed=1000,
                  training_episodes: int = 2000,
                  stop_threshold: float = None,
                  env_steps: int = 250,
@@ -68,23 +65,17 @@ def td3_ig_train(function: functions_core.Function,
   exploration_noise_num_steps = round(exploration_noise_num_episodes *
                                       env_steps)
 
-  # Obtaining the function's Tensorflow implementation (Needed for metrics).
-  tf_function = npf.get_tf_function(function)
-
   # Creating the environments.
-  env_training = py_fun_env.PyFunctionEnv(function=function,
-                                          dims=dims,
-                                          bounded_actions_spec=False)
-  env_training = wrappers.TimeLimit(env=env_training, duration=env_steps)
-
-  env_eval = py_fun_env.PyFunctionEnv(function=function,
-                                      dims=dims,
-                                      bounded_actions_spec=False)
-  env_eval = wrappers.TimeLimit(env=env_eval, duration=env_eval_steps)
-
-  # Conversion to TFPyEnvironment's.
-  tf_env_training = tf_py_environment.TFPyEnvironment(environment=env_training)
-  tf_env_eval = tf_py_environment.TFPyEnvironment(environment=env_eval)
+  tf_env_training = tf_fun_env.TFFunctionEnv(function=function,
+                                             dims=dims,
+                                             seed=seed,
+                                             duration=env_steps,
+                                             bounded_actions_spec=False)
+  tf_env_eval = tf_fun_env.TFFunctionEnv(function=function,
+                                         dims=dims,
+                                         seed=seed,
+                                         duration=env_eval_steps,
+                                         bounded_actions_spec=False)
 
   # Instantiating the SummaryWriter's
   print('Creating logs directories.')
@@ -104,7 +95,7 @@ def td3_ig_train(function: functions_core.Function,
 
   eval_metrics = [tf_metrics.AverageReturnMetric(buffer_size=eval_episodes),
                   tf_custom_metrics.AverageBestObjectiveValueMetric(
-                    function=tf_function, buffer_size=eval_episodes)]
+                    function=function, buffer_size=eval_episodes)]
 
   # Agent, Neural Networks and Optimizers.
   obs_spec = tf_env_training.observation_spec()
@@ -223,6 +214,7 @@ def td3_ig_train(function: functions_core.Function,
 
   # Dictionary containing the hyperparameters
   hp_dict = {
+    "seed": seed,
     "discount": discount,
     "exploration_noise_std": exploration_noise_std,
     "exploration_noise_std_end": exploration_noise_std_end,
@@ -322,7 +314,7 @@ def td3_ig_train(function: functions_core.Function,
 
 
 if __name__ == '__main__':
-  td3_ig_train(npf.Sphere(), 2,
+  td3_ig_train(tff.Sphere(), 2,
                env_steps=50,
                eval_interval=10,
                env_eval_steps=100,

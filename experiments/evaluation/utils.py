@@ -6,6 +6,7 @@ import csv
 import os
 
 import matplotlib.pyplot as plt
+import matplotlib.scale as mpl_scale
 import numpy as np
 import numpy.random as rand
 import pandas as pd
@@ -15,13 +16,9 @@ from tf_agents.drivers import dynamic_episode_driver as dy_ed
 from tf_agents.utils import common
 from tf_agents.policies import tf_policy
 
-from optfuncs import core
 from optfuncs import tensorflow_functions as tff
-from optfuncs import numpy_functions as npf
 
 from src.metrics import tf_custom_metrics
-
-from experiments.training import utils as training_utils
 
 
 # Baseline evaluation data.
@@ -35,17 +32,16 @@ class BaselineEvalData(typing.NamedTuple):
 
 def evaluate_agent(eval_env: tf_environment.TFEnvironment,
                    policy_eval: tf_policy.TFPolicy,
-                   function: core.Function,
+                   function: tff.TensorflowFunction,
                    dims: int,
                    steps: int,
                    algorithm_name: str,
                    save_dir: str,
                    save_to_file=False,
                    episodes=100):
-  tf_function = npf.get_tf_function(function)
   eval_metrics = [tf_custom_metrics.ConvergenceMultiMetric(
     trajectory_size=steps + 1,
-    function=tf_function,
+    function=function,
     buffer_size=episodes)]
 
   eval_driver = dy_ed.DynamicEpisodeDriver(env=eval_env,
@@ -70,7 +66,7 @@ def evaluate_agent(eval_env: tf_environment.TFEnvironment,
                                               function.name,
                                               dims))
 
-  ax.set_yscale('log')
+  ax.set_yscale("symlog", linthresh=1e-7, subs=[2, 3, 4, 5, 6, 7, 8, 9])
   ax.set_xlim(left=0)
 
   ax.legend()
@@ -114,7 +110,7 @@ def eager_compute(metrics,
   return collections.OrderedDict(results)
 
 
-def evaluate_baselines(functions: typing.List[core.Function],
+def evaluate_baselines(functions: typing.List[tff.TensorflowFunction],
                        dims: int,
                        steps=500,
                        episodes=100):
@@ -122,7 +118,6 @@ def evaluate_baselines(functions: typing.List[core.Function],
 
   for fun in functions:
     rng = rand.default_rng()
-    tf_function = npf.get_tf_function(fun)
 
     gd_bs = []
     gd_bs_it = []
@@ -139,27 +134,27 @@ def evaluate_baselines(functions: typing.List[core.Function],
                             low=fun.domain.min,
                             high=fun.domain.max)
 
-      gd = GD(tf_function,
+      gd = GD(fun,
               pos=gd_pos,
               steps=steps)
       gd_bs.append(gd[0][-1])
       gd_bs_it.append(gd[1])
 
-      nag = NAG(tf_function,
+      nag = NAG(fun,
                 pos=nag_pos,
                 steps=steps)
       nag_bs.append(nag[0][-1])
       nag_bs_it.append(nag[1])
 
     data_gd = BaselineEvalData('GD',
-                               tf_function.name,
+                               fun.name,
                                np.mean(gd_bs).astype(np.float32).item(),
                                np.std(gd_bs).astype(np.float32).item(),
                                int(np.rint(np.mean(gd_bs_it))))
     baseline_eval_data.append(data_gd)
 
     data_nag = BaselineEvalData('NAG',
-                                tf_function.name,
+                                fun.name,
                                 np.mean(nag_bs).astype(np.float32).item(),
                                 np.std(nag_bs).astype(np.float32).item(),
                                 int(np.rint(np.mean(nag_bs_it))))
@@ -194,7 +189,7 @@ gd_lrs = {'F1': 1e-1,
 
 
 # Baseline: GD (Gradient Descent)
-def GD(function: core.Function,
+def GD(function: tff.TensorflowFunction,
        pos: typing.Union[tf.Tensor, np.ndarray],
        steps=500):
   lr = gd_lrs.get(function.name, 1e-2)
@@ -204,12 +199,12 @@ def GD(function: core.Function,
   domain = function.domain
 
   for t in range(steps):
-    grads, _ = tff.get_grads(function, pos)
-    pos = tf.clip_by_value(pos - lr * grads,
+    grads, _ = function.grads_at(pos)
+    pos = tf.clip_by_value(pos - tf.multiply(grads, lr),
                            clip_value_min=domain.min,
                            clip_value_max=domain.max)
 
-    y = function(pos)
+    y = function(pos).numpy()
     if y < best_solutions[-1]:
       best_it = t
     best_solutions.append(min(y, best_solutions[-1]))
@@ -228,7 +223,7 @@ nag_params = {'F1': (1e-1, 0.5),
 
 
 # Baseline: NAG (Nesterov accelerated gradient)
-def NAG(function: core.Function,
+def NAG(function: tff.TensorflowFunction,
         pos: typing.Union[tf.Tensor, np.ndarray],
         steps=500):
   lr, momentum = nag_params.get(function.name, (1e-2, 0.8))
@@ -243,14 +238,14 @@ def NAG(function: core.Function,
     projected = tf.clip_by_value(pos + momentum * velocity,
                                  clip_value_min=domain.min,
                                  clip_value_max=domain.max)
-    grads, _ = tff.get_grads(function, projected)
+    grads, _ = function.grads_at(projected)
 
-    velocity = momentum * velocity - lr * grads
+    velocity = momentum * velocity - tf.multiply(grads, lr)
     pos = tf.clip_by_value(pos + velocity,
                            clip_value_min=domain.min,
                            clip_value_max=domain.max)
 
-    current_pos = function(pos)
+    current_pos = function(pos).numpy()
     if current_pos < best_solutions[-1]:
       best_it = t
     best_solutions.append(min(current_pos, best_solutions[-1]))

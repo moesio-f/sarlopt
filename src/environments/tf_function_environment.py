@@ -5,22 +5,27 @@ from tensorflow.python.autograph.impl import api as autograph
 from tf_agents import specs
 from tf_agents.environments import tf_environment
 from tf_agents.trajectories import time_step as ts
-from tf_agents.utils import common
+from tf_agents.utils import common, nest_utils
 
 from optfuncs import core
+from optfuncs import tensorflow_functions as tff
 
 FIRST = ts.StepType.FIRST
 MID = ts.StepType.MID
 LAST = ts.StepType.LAST
-MAX_STEPS = 50000
 
 
-class TFFunctionEnvironment(tf_environment.TFEnvironment):
+class TFFunctionEnv(tf_environment.TFEnvironment):
   """Single-agent function environment."""
-  def __init__(self, function: core.Function, dims,
-               duration: int = MAX_STEPS,
-               bounded_actions_spec: bool = True):
+
+  def __init__(self, function: tff.TensorflowFunction,
+               dims,
+               seed,
+               duration: int = 50000,
+               bounded_actions_spec: bool = True,
+               alg=tf.random.Algorithm.PHILOX):
     self._function = function
+    self._function.enable_tf_function()
     self._domain_min = tf.cast(function.domain.min, tf.float32)
     self._domain_max = tf.cast(function.domain.max, tf.float32)
     self._dims = dims
@@ -41,7 +46,10 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
     time_step_spec = ts.time_step_spec(observation_spec)
     super().__init__(time_step_spec, action_spec)
 
-    self._generator = tf.random.Generator.from_non_deterministic_state()
+    self._seed = seed
+    self._alg = alg
+
+    self._rng = tf.random.Generator.from_seed(self._seed, self._alg)
 
     self._episode_ended = common.create_variable(name='episode_ended',
                                                  initial_value=False,
@@ -52,13 +60,14 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
     self._duration = tf.constant(value=duration,
                                  dtype=tf.int32,
                                  name='duration')
-    self._state = common.create_variable(name='state',
-                                         initial_value=self._generator.uniform(
-                                           shape=observation_spec.shape,
-                                           minval=self._domain_min,
-                                           maxval=self._domain_max,
-                                           dtype=tf.float32),
-                                         dtype=tf.float32)
+    self._state = common.create_variable(
+      name='state',
+      initial_value=self._rng.uniform(
+        shape=tf.TensorShape(1).concatenate(observation_spec.shape),
+        minval=self._domain_min,
+        maxval=self._domain_max,
+        dtype=tf.float32),
+      dtype=tf.float32)
 
   def _current_time_step(self) -> ts.TimeStep:
     state = self._state.value()
@@ -69,11 +78,11 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
 
     def mid():
       return (tf.constant(MID, dtype=tf.int32),
-              tf.math.negative(self._function(state)))
+              tf.reshape(tf.math.negative(self._function(state)), shape=()))
 
     def last():
       return (tf.constant(LAST, dtype=tf.int32),
-              tf.math.negative(self._function(state)))
+              tf.reshape(tf.math.negative(self._function(state)), shape=()))
 
     discount = tf.constant(1.0, dtype=tf.float32)
     step_type, reward = tf.case(
@@ -82,10 +91,11 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
       default=mid,
       exclusive=True, strict=True)
 
-    return ts.TimeStep(step_type=step_type,
-                       reward=reward,
-                       discount=discount,
-                       observation=state)
+    return nest_utils.batch_nested_tensors(ts.TimeStep(step_type=step_type,
+                                                       reward=reward,
+                                                       discount=discount,
+                                                       observation=state),
+                                           self.time_step_spec())
 
   def _reset(self) -> ts.TimeStep:
     reset_ended = self._episode_ended.assign(value=False)
@@ -93,13 +103,12 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
 
     with tf.control_dependencies([reset_ended, reset_steps]):
       state_reset = self._state.assign(
-        value=self._generator.uniform(shape=self.observation_spec().shape,
-                                      minval=self._domain_min,
-                                      maxval=self._domain_max,
-                                      dtype=tf.float32))
+        value=self._rng.uniform(
+          shape=tf.TensorShape(1).concatenate(self.observation_spec().shape),
+          minval=self._domain_min,
+          maxval=self._domain_max,
+          dtype=tf.float32))
     with tf.control_dependencies([state_reset]):
-      self._last_position.assign(self._state)
-      self._last_objective_value.assign(self._function(self._state))
       time_step = self.current_time_step()
 
     return time_step
@@ -117,13 +126,11 @@ class TFFunctionEnvironment(tf_environment.TFEnvironment):
         state_update = self._state.assign(new_state)
         self._steps_taken.assign_add(1)
         episode_finished = tf.cond(
-          pred=tf.math.greater_equal(self._steps_taken, MAX_STEPS),
+          pred=tf.math.greater_equal(self._steps_taken, self._duration),
           true_fn=lambda: self._episode_ended.assign(True),
           false_fn=self._episode_ended.value)
 
       with tf.control_dependencies([state_update, episode_finished]):
-        self._last_position.assign(self._state)
-        self._last_objective_value.assign(self._function(self._state))
         return self.current_time_step()
 
     def reset_env():
