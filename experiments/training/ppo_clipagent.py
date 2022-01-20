@@ -19,7 +19,7 @@ from tf_agents.metrics import tf_metrics
 from optfuncs import numpy_functions as npf
 from optfuncs import core as functions_core
 
-from src.environments import py_function_environment as py_func_env
+from src.environments import py_function_env as py_func_env
 from src.typing.types import LayerParam
 from src.metrics import tf_custom_metrics
 

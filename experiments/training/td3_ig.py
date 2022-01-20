@@ -14,7 +14,7 @@ from tf_agents.metrics import tf_metrics
 from optfuncs import tensorflow_functions as tff
 
 from src.agents import td3_inverting_gradients as td3_ig
-from src.environments import tf_function_environment as tf_fun_env
+from src.environments import tf_function_env as tf_fun_env
 from src.networks import linear_actor_network as linear_actor_net
 from src.typing.types import LayerParam
 from src.metrics import tf_custom_metrics

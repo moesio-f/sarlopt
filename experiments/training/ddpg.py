@@ -14,7 +14,7 @@ from tf_agents.metrics import tf_metrics
 
 from optfuncs import tensorflow_functions as tff
 
-from src.environments import tf_function_environment as tf_fun_env
+from src.environments import tf_function_env as tf_fun_env
 from src.networks import linear_actor_network as lin_actor_net
 from src.metrics import tf_custom_metrics
 from src.typing.types import LayerParam

@@ -8,7 +8,7 @@ from tf_agents.environments import wrappers
 
 from optfuncs import numpy_functions as npf
 
-from src.environments import py_function_environment as py_fun_env
+from src.environments import py_function_env as py_fun_env
 from src import config
 
 from experiments.evaluation import utils as eval_utils
