@@ -18,7 +18,7 @@ from tf_agents.policies import tf_policy
 
 from optfuncs import tensorflow_functions as tff
 
-from src.metrics import tf_custom_metrics
+from sarlopt.metrics import tf_custom_metrics
 
 
 # Baseline evaluation data.

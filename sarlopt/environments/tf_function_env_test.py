@@ -8,7 +8,7 @@ from tf_agents.typing import types
 from optfuncs import core
 from optfuncs import tensorflow_functions as tff
 
-from src.environments.tf_function_env import TFFunctionEnv
+from sarlopt.environments.tf_function_env import TFFunctionEnv
 
 
 class DummyFunction(tff.TensorflowFunction):

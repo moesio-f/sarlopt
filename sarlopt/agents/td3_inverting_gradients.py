@@ -23,7 +23,7 @@ from tf_agents.utils import nest_utils
 from tf_agents.utils import object_identity
 from tf_agents.agents.td3 import td3_agent
 
-from src.policies import gaussian_policy_linear_decay
+from sarlopt.policies import gaussian_policy_linear_decay
 
 
 @gin.configurable

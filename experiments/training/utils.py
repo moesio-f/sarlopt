@@ -10,7 +10,7 @@ from tf_agents.policies import policy_saver
 
 from optfuncs import core
 
-from src import config
+from sarlopt import config
 
 ROOT_DIR = config.ROOT_DIR
 OUTPUT_DIR = config.OUTPUT_DIR

@@ -10,7 +10,7 @@ from tf_agents.trajectories import policy_step
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
 
-from src.policies import custom_gaussian_policy
+from sarlopt.policies import custom_gaussian_policy
 
 tfd = tfp.distributions
 

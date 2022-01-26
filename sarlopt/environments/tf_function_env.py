@@ -7,7 +7,6 @@ from tf_agents.environments import tf_environment
 from tf_agents.trajectories import time_step as ts
 from tf_agents.utils import common, nest_utils
 
-from optfuncs import core
 from optfuncs import tensorflow_functions as tff
 
 FIRST = ts.StepType.FIRST
