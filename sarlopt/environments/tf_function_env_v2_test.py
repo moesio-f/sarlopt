@@ -9,7 +9,7 @@ from optfuncs import core
 from optfuncs import tensorflow_functions as tff
 
 from sarlopt.environments.tf_function_env_v2 import TFFunctionEnvV2
-from sarlopt.utils.random import functions as rand_fn
+from sarlopt.utils.functions import random_functions as rand_fn
 
 
 class DummyFunction(tff.TensorflowFunction):
