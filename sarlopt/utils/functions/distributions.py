@@ -22,7 +22,7 @@ class FunctionDistribution(abc.ABC):
 
 class UniformFunctionDistribution(FunctionDistribution):
   def __init__(self,
-               functions: typing.Union[typing.List[FunctionList], FunctionList],
+               functions: typing.List[FunctionList],
                vshift_bounds: ParamBound,
                hshift_bounds: ParamBound,
                scale_bounds: ParamBound,
