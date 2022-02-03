@@ -55,6 +55,9 @@ class UniformFunctionDistribution(FunctionDistribution):
       lambda f: lambda: f(x),
       self._fns)
 
+    self._domains = tf.constant([(f.domain.min, f.domain.max) for f in
+                                 self._fns],
+                                dtype=dtype)
     self._len_classes = tf.constant([len(fn_l) for fn_l in functions],
                                     dtype=tf.int32)
     self._cum_sum_len_classes = tf.cumsum(self._len_classes)
@@ -152,7 +155,7 @@ class UniformFunctionDistribution(FunctionDistribution):
       random_fn_index = self._rng.uniform(
         shape=(),
         minval=0,
-        maxval=tf.gather(self._len_classes, self._class_index),
+        maxval=tf.gather(self._len_classes, random_cls_index),
         dtype=tf.int32)
 
     with tf.control_dependencies([random_hshift,
@@ -243,6 +246,15 @@ class UniformFunctionDistribution(FunctionDistribution):
   def disable_tf_function(self):
     self._fn = self._call
 
+  @property
+  def current_domain(self) -> tf.Tensor:
+    cls_index = self._class_index.value()
+    fn_index = self._fn_index.value()
+
+    with tf.control_dependencies([cls_index, fn_index]):
+      index = self._flat_indice_mapper(cls_index, fn_index)
+      with tf.control_dependencies([index]):
+        return tf.gather(self._domains, index)
+
   def __call__(self, x: tf.Tensor) -> tf.Tensor:
     return self._fn(x)
-

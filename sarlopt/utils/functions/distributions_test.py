@@ -45,7 +45,7 @@ class SepMultimodalF2(tff.TensorflowFunction):
 
 class PartUnimodalF1(tff.TensorflowFunction):
   def __init__(self):
-    super(PartUnimodalF1, self).__init__(core.Domain(-100.0, 100.0))
+    super(PartUnimodalF1, self).__init__(core.Domain(-50.0, 50.0))
 
   def _call(self, x: tf.Tensor):
     return tf.pow(tf.reduce_sum(tf.pow(x, 2), axis=-1), 2)
@@ -204,3 +204,24 @@ class UniformFunctionDistributionTest(tf.test.TestCase):
     grads, fx = fn_distribution.grads_at(x)
     self.assertEqual(expected_fx, fx)
     self.assertAllEqual(expected_grads, grads)
+
+  def test_domain(self):
+    fn_distribution = UniformFunctionDistribution(
+      functions=self.functions,
+      dims_params=self.dims,
+      rng_seed=self.seed,
+      rng_alg=self.alg,
+      vshift_bounds=self.vshift_bounds,
+      hshift_bounds=self.hshift_bounds,
+      scale_bounds=self.scale_bounds,
+      dtype=self.dtype)
+    fn_distribution.enable_tf_function()
+
+    fn_distribution.sample()
+    domain = tf.constant(self.functions[0][0].domain, dtype=self.dtype)
+    self.assertAllEqual(domain, fn_distribution.current_domain)
+
+    fn_distribution.sample()
+    domain = tf.constant(self.functions[2][0].domain, dtype=self.dtype)
+    self.assertAllEqual(domain, fn_distribution.current_domain)
+
