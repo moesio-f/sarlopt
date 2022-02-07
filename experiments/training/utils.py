@@ -42,22 +42,28 @@ def save_specs(agent_dir: str,
     json.dump(specs_dict, specs_file, indent=True)
 
 
-def create_agent_dir(algorithm_name: str,
-                     function: core.Function,
-                     dims: int) -> str:
+def create_agent_dir_str(algorithm_name: str,
+                         info_str: str,
+                         dims: int) -> str:
   str_dims = str(dims)
-  agent_identifier = f'{algorithm_name}-{str_dims}D-{function.name}-0'
+  agent_identifier = f'{algorithm_name}-{str_dims}D-{info_str}-0'
   agent_dir = os.path.join(OUTPUT_DIR, agent_identifier)
 
   # TODO: Reduce time complexity.
   i = 0
   while os.path.exists(agent_dir):
     i += 1
-    agent_identifier = f'{algorithm_name}-{str_dims}D-{function.name}-{i}'
+    agent_identifier = f'{algorithm_name}-{str_dims}D-{info_str}-{i}'
     agent_dir = os.path.join(OUTPUT_DIR, agent_identifier)
 
   tf_io.gfile.makedirs(agent_dir)
   return agent_dir
+
+
+def create_agent_dir(algorithm_name: str,
+                     function: core.Function,
+                     dims: int) -> str:
+  return create_agent_dir_str(algorithm_name, function.name, dims)
 
 
 def json_pretty_string(hp):

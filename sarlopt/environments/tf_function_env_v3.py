@@ -188,10 +188,10 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
         bonus = tf.case(
           [(tf.math.less(
             distance_to_known_min, 0),
-            lambda: tf.constant(100, dtype=tf.float32)),
+            lambda: tf.constant(10, dtype=tf.float32)),
             (tf.math.logical_and(tf.math.greater(distance_to_known_min, 0),
                                  tf.math.less(distance_to_known_min, 0.5)),
-             lambda: distance_to_known_min)],
+             lambda: 10*distance_to_known_min)],
           default=lambda: tf.constant(0, dtype=tf.float32),
           exclusive=True, strict=True)
 
