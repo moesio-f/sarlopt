@@ -179,8 +179,8 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
 
     with tf.control_dependencies([fx_t, fx_t1, known_min, known_max]):
       clipped_delta = tf.clip_by_value(fx_t - fx_t1,
-                                       clip_value_min=1e2,
-                                       clip_value_max=-1e2)
+                                       clip_value_min=-1e2,
+                                       clip_value_max=1e2)
       scaled_fx_t1 = min_max_scaling(fx_t1, known_min, known_max)
       distance_to_known_min = fx_t1 - known_min
 
