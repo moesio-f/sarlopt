@@ -30,6 +30,7 @@ class LSTMTD3ActorNetwork(network.Network):
                name='LSTMTD3ActorNetwork'):
     if not isinstance(input_tensor_spec, LSTMTD3InputActor):
       raise ValueError("Input spec not supported.")
+    output_tensor_spec = tensor_spec.from_spec(output_tensor_spec)
 
     # Memory
     # Before LSTM
@@ -105,6 +106,10 @@ class LSTMTD3ActorNetwork(network.Network):
 
     self._after_concat_layers = after_concat_layers
     self._output_action_layer = output_action_layer
+
+  @property
+  def output_tensor_spec(self):
+    return self._output_tensor_spec
 
   def call(self, inputs, step_type, network_state=(), training=False):
     del step_type  # unused.

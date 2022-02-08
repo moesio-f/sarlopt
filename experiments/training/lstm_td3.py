@@ -67,8 +67,10 @@ def evaluate_agent(agent: lstm_td3_agent.LSTMTD3Agent,
                    false_fn=lambda: tf.multiply(g, tf.math.exp(-p)))
 
   for _ in range(history_length):
-    history_obs.append(tf.zeros(shape=(4,), dtype=tf.float32))
-    history_act.append(tf.zeros(shape=(2,), dtype=tf.float32))
+    history_obs.append(tf.zeros(shape=agent.time_step_spec.observation.shape,
+                                dtype=tf.float32))
+    history_act.append(tf.zeros(shape=agent.action_spec.shape,
+                                dtype=tf.float32))
 
   print('-------- Evaluation --------')
   print('Function: {0}'.format(function.name))
@@ -131,16 +133,16 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
                    eval_episodes: int = 10,
                    initial_collect_episodes: int = 20,
                    collect_steps_per_iteration: int = 1,
-                   history_length: int = 10,  # Change to curriculum strategy.
+                   history_length: int = 3,  # Change to curriculum strategy.
                    buffer_size: int = 1000000,
                    batch_size: int = 64,
                    actor_lr: float = 3e-4,
-                   critic_lr: float = 3e-4,
-                   tau: float = 5e-3,
+                   critic_lr: float = 1e-3,
+                   tau: float = 1e-3,
                    actor_update_period: int = 2,
                    target_update_period: int = 2,
                    discount: float = 0.99,
-                   exploration_noise_std: float = 0.1,  # + analytic optimizers.
+                   exploration_noise_std: float = 0.15, # + analytic optimizers.
                    target_policy_noise: float = 0.2,
                    target_policy_noise_clip: float = 0.5,
                    actor_layers: LayersLSTMTD3 = None,
@@ -180,12 +182,9 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
     log_train_dir, flush_millis=summary_flush_secs * 1000)
   train_summary_writer.set_as_default()
 
-  eval_summary_writer = tf.compat.v2.summary.create_file_writer(
-    log_eval_dir, flush_millis=summary_flush_secs * 1000)
-
   # Instantiating the metrics.
-  train_metrics = [tf_metrics.AverageReturnMetric(),
-                   tf_metrics.MaxReturnMetric()]
+  train_metrics = [tf_metrics.AverageReturnMetric(buffer_size=100),
+                   tf_metrics.MaxReturnMetric(buffer_size=100)]
 
   # Agent, Neural Networks and Optimizers.
   obs_spec = tf_env_training.observation_spec()
@@ -344,7 +343,6 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
           'Delta time since last episode: {1:.2f}'.format(ep, delta_time))
 
   # Saving the learned policy.
-  # Output directory: output/TD3-{dims}D-{function.name}-{num}/policy
   training_utils.save_policy(agent_dir, agent.policy)
 
 
@@ -361,4 +359,5 @@ if __name__ == '__main__':
                    scale_bounds=(-4.0, 4.0),
                    dims_params=2),
                  dims=2,
-                 stop_threshold=1e-3)
+                 stop_threshold=1e-3,
+                 seed=0)

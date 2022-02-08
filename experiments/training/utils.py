@@ -3,14 +3,19 @@
 import os
 import json
 import typing
+import h5py
 
+import tensorflow as tf
 from tensorflow import io as tf_io
+
 from tf_agents.policies import tf_policy
 from tf_agents.policies import policy_saver
+from tf_agents.specs import tensor_spec
 
 from optfuncs import core
 
 from sarlopt import config
+from sarlopt.policies import lstm_td3_policies
 
 ROOT_DIR = config.ROOT_DIR
 OUTPUT_DIR = config.OUTPUT_DIR
@@ -32,8 +37,27 @@ def save_policy(agent_dir: str,
   output_dir = os.path.join(agent_dir, 'policy')
   tf_io.gfile.makedirs(output_dir)
 
-  tf_policy_saver = policy_saver.PolicySaver(policy)
-  tf_policy_saver.save(output_dir)
+  if isinstance(policy, lstm_td3_policies.LSTMTD3ActorPolicy) or \
+     isinstance(policy, lstm_td3_policies.LSTMTD3GaussianPolicy):
+    print('LSTM-TD3 policies only support saving weights and spec.')
+    print('Custom loading is necessary after saved.')
+    net = policy.actor_network(copy=True)
+    input_spec = net.input_tensor_spec
+    output_spec = net.output_tensor_spec
+    tensor_spec.to_pbtxt_file(os.path.join(output_dir, 'input_spec.pbtxt'),
+                              input_spec)
+    tensor_spec.to_pbtxt_file(os.path.join(output_dir, 'output_spec.pbtxt'),
+                              output_spec)
+    f = h5py.File(os.path.join(output_dir, 'weights.hdf5'), 'w')
+    for layer in net.layers:
+      weights = layer.get_weights()
+      layer_group = f.create_group(layer.name)
+      for i, wlist in enumerate(weights):
+        layer_group.create_dataset(name=f'{i}', data=wlist)
+    f.close()
+  else:
+    tf_policy_saver = policy_saver.PolicySaver(policy)
+    tf_policy_saver.save(output_dir)
 
 
 def save_specs(agent_dir: str,

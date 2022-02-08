@@ -142,6 +142,16 @@ class LSTMTD3ActorPolicy(tf_policy.TFPolicy):
   def _variables(self):
     return self._actor_network.variables
 
+  def actor_network(self, copy=True) -> LSTMTD3ActorNetwork:
+    actor_network = self._actor_network
+    if copy:
+      actor_network = common.maybe_copy_target_network_with_checks(
+        actor_network,
+        None,
+        name='ActorNetwork')
+    return actor_network
+
+  @tf.function(autograph=True)
   def _distribution(self, time_step, policy_state):
     step_type = time_step.step_type
     observation = time_step.observation
@@ -226,6 +236,15 @@ class LSTMTD3GaussianPolicy(tf_policy.TFPolicy):
   @property
   def observation_normalizer(self):
     return None
+
+  def actor_network(self, copy=True) -> LSTMTD3ActorNetwork:
+    actor_network = self._actor_network
+    if copy:
+      actor_network = common.maybe_copy_target_network_with_checks(
+        actor_network,
+        None,
+        name='ActorNetwork')
+    return actor_network
 
   def _variables(self):
     return self._actor_network.variables
