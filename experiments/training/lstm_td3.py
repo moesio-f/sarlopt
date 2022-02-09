@@ -1,5 +1,5 @@
 """LSTM-TD3 for L2O."""
-
+import sys
 import time
 import typing
 
@@ -37,15 +37,16 @@ class DistributionBounds(typing.NamedTuple):
   dims_params: int
 
 
-def evaluate_agent(agent: lstm_td3_agent.LSTMTD3Agent,
-                   function: tff.TensorflowFunction,
-                   dims: int,
-                   steps: int,
-                   episodes: int,
-                   seed=10000):
-  history_length = agent.history_length()
+def evaluate_policy(policy,
+                    function: tff.TensorflowFunction,
+                    dims: int,
+                    steps: int,
+                    episodes: int,
+                    seed=10000):
+  assert isinstance(policy, lstm_td3_agent.LSTMTD3ActorPolicy)
   # noinspection PyProtectedMember
-  network = common.maybe_copy_target_network_with_checks(agent._actor_network,
+  history_length = policy.history_length
+  network = common.maybe_copy_target_network_with_checks(policy.actor_network(),
                                                          name='ActorPolicy')
 
   rng = tf.random.Generator.from_seed(seed, tf.random.Algorithm.PHILOX)
@@ -67,9 +68,9 @@ def evaluate_agent(agent: lstm_td3_agent.LSTMTD3Agent,
                    false_fn=lambda: tf.multiply(g, tf.math.exp(-p)))
 
   for _ in range(history_length):
-    history_obs.append(tf.zeros(shape=agent.time_step_spec.observation.shape,
+    history_obs.append(tf.zeros(shape=policy.time_step_spec.observation.shape,
                                 dtype=tf.float32))
-    history_act.append(tf.zeros(shape=agent.action_spec.shape,
+    history_act.append(tf.zeros(shape=policy.action_spec.shape,
                                 dtype=tf.float32))
 
   print('-------- Evaluation --------')
@@ -125,24 +126,24 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
                    dims: int,
                    actions_bounds: typing.Tuple[float, float],
                    seed=1000,
-                   training_episodes: int = 2000,
+                   training_episodes: int = 6000,
                    stop_threshold: float = None,
                    env_steps: int = 50,
-                   eval_steps: int = 500,
+                   eval_steps: int = 100,
                    eval_interval: int = 100,
                    eval_episodes: int = 10,
-                   initial_collect_episodes: int = 20,
+                   initial_collect_episodes: int = 10,
                    collect_steps_per_iteration: int = 1,
-                   history_length: int = 3,  # Change to curriculum strategy.
+                   history_length: int = 10,  # Change to curriculum strategy.
                    buffer_size: int = 1000000,
-                   batch_size: int = 64,
-                   actor_lr: float = 3e-4,
+                   batch_size: int = 128,
+                   actor_lr: float = 1e-3,
                    critic_lr: float = 1e-3,
                    tau: float = 1e-3,
                    actor_update_period: int = 2,
-                   target_update_period: int = 2,
+                   target_update_period: int = 1,
                    discount: float = 0.99,
-                   exploration_noise_std: float = 0.15, # + analytic optimizers.
+                   exploration_noise_std: float = 0.1,
                    target_policy_noise: float = 0.2,
                    target_policy_noise_clip: float = 0.5,
                    actor_layers: LayersLSTMTD3 = None,
@@ -324,11 +325,12 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
     start_time = time.time()
 
     if ep % eval_interval == 0:
-      result = evaluate_agent(agent=agent,
-                              function=tff.Sphere(),
-                              dims=dims,
-                              steps=eval_steps,
-                              episodes=eval_episodes)
+      result = evaluate_policy(policy=agent.policy,
+                               function=tff.Sphere(
+                                 tff.core.Domain(-5.12, 5.12)),
+                               dims=dims,
+                               steps=eval_steps,
+                               episodes=eval_episodes)
       if stop_threshold is not None and result < stop_threshold:
         break
 
@@ -343,20 +345,16 @@ def train_lstm_td3(functions: typing.List[fn_distributions.FunctionList],
           'Delta time since last episode: {1:.2f}'.format(ep, delta_time))
 
   # Saving the learned policy.
-  training_utils.save_policy(agent_dir, agent.policy)
+  training_utils.save_policy(agent_dir, agent.policy, layers_specs=actor_layers)
 
 
 if __name__ == '__main__':
-  # tf.config.run_functions_eagerly(True)
-  # tf.data.experimental.enable_debug_mode()
-  train_lstm_td3(functions=[[tff.SchumerSteiglitz(),
-                             tff.PowellSum(),
-                             tff.SumSquares()]],
-                 actions_bounds=(-100.0, 100.0),
+  train_lstm_td3(functions=[[tff.Sphere(tff.core.Domain(-5.12, 5.12))]],
+                 actions_bounds=(-1.0, 1.0),
                  dist_bounds=DistributionBounds(
-                   vshift_bounds=(-100.0, 100.0),
-                   hshift_bounds=(-15.0, 15.0),
-                   scale_bounds=(-4.0, 4.0),
+                   vshift_bounds=(-50.0, 50.0),
+                   hshift_bounds=(-10.0, 10.0),
+                   scale_bounds=(-0.5, 2.0),
                    dims_params=2),
                  dims=2,
                  stop_threshold=1e-3,

@@ -58,6 +58,10 @@ class HistoryBuffer(object):
       self._lambda_read_otherwise,
       self._lambda_read_full)
 
+  @property
+  def history_length(self):
+    return self._hist_len
+
   def add(self, observation, action):
     self._obs_buffer.write(self._write_head, observation)
     self._act_buffer.write(self._write_head, action)
@@ -134,6 +138,10 @@ class LSTMTD3ActorPolicy(tf_policy.TFPolicy):
       emit_log_probability=False,
       validate_args=True,
       name=name)
+
+  @property
+  def history_length(self):
+    return self._memory.history_length
 
   @property
   def observation_normalizer(self):
@@ -232,6 +240,10 @@ class LSTMTD3GaussianPolicy(tf_policy.TFPolicy):
       emit_log_probability=False,
       validate_args=True,
       name=name)
+
+  @property
+  def history_length(self):
+    return self._memory.history_length
 
   @property
   def observation_normalizer(self):

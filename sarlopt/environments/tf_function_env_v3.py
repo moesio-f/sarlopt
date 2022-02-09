@@ -30,17 +30,7 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     States (s) are x, grad_at(x), f(x), expected_min, expected_max plus
       other hidden (unknown) states.
     Reward function is
-      R(s_t, a_t, s_{t+1}) = clipped(f(x_t) - f(x_{t+1}))
-        + min_max_scaling(f(x_{t+1}))  + bonus
-        where bonus = 100, if d < 0
-                        d, 0 <= d < 0.5
-                        0, otherwise
-            let
-              d = f(x_{t+1}) - expected_min
-
-    bonus should encourage getting closer (and better than expected min)
-    Generalization of hidden states would be keep running statistics of the
-      function for the iterates.
+      R(s_t, a_t, s_{t+1}) = -f(x_{t+1})
     """
 
   def __init__(self,
@@ -69,7 +59,7 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
                                      dtype=tf.float32,
                                      name='action')
 
-    observation_spec = specs.TensorSpec(shape=tf.TensorShape([2*self._dims]),
+    observation_spec = specs.TensorSpec(shape=tf.TensorShape([2 * self._dims]),
                                         dtype=tf.float32,
                                         name='observation')
 
@@ -151,10 +141,7 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
 
   def _current_time_step(self) -> ts.TimeStep:
     grads = self._grads_at_x.value()
-    fx_t = self._fx_t.value()
     fx_t1 = self._fx_t1.value()
-    known_min = self._known_min.value()
-    known_max = self._known_max.value()
 
     with tf.control_dependencies([grads]):
       def log_processing(g: tf.Tensor):
@@ -177,39 +164,21 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
         observation = tf.concat([log_grad, sign_grad], axis=-1,
                                 name='log_sign_grad_concat')
 
-    with tf.control_dependencies([fx_t, fx_t1, known_min, known_max]):
-      clipped_delta = tf.clip_by_value(fx_t - fx_t1,
-                                       clip_value_min=-1e2,
-                                       clip_value_max=1e2)
-      scaled_fx_t1 = min_max_scaling(fx_t1, known_min, known_max)
-      distance_to_known_min = fx_t1 - known_min
-
-      with tf.control_dependencies([distance_to_known_min]):
-        bonus = tf.case(
-          [(tf.math.less(
-            distance_to_known_min, 0),
-            lambda: tf.constant(10, dtype=tf.float32)),
-            (tf.math.logical_and(tf.math.greater(distance_to_known_min, 0),
-                                 tf.math.less(distance_to_known_min, 0.5)),
-             lambda: 10*distance_to_known_min)],
-          default=lambda: tf.constant(0, dtype=tf.float32),
-          exclusive=True, strict=True)
-
     def first():
       return (tf.constant(FIRST, dtype=tf.int32),
               tf.constant(0.0, dtype=tf.float32))
 
     def mid():
       return (tf.constant(MID, dtype=tf.int32),
-              tf.reshape(clipped_delta + scaled_fx_t1 + bonus,
+              tf.reshape(-fx_t1,
                          shape=()))
 
     def last():
       return (tf.constant(LAST, dtype=tf.int32),
-              tf.reshape(clipped_delta + scaled_fx_t1 + bonus,
+              tf.reshape(-fx_t1,
                          shape=()))
 
-    with tf.control_dependencies([clipped_delta, scaled_fx_t1, bonus]):
+    with tf.control_dependencies([fx_t1]):
       discount = tf.constant(1.0, dtype=tf.float32)
       step_type, reward = tf.case(
         [(tf.math.less_equal(self._steps_taken, 0), first),
