@@ -17,20 +17,17 @@ MID = ts.StepType.MID
 LAST = ts.StepType.LAST
 
 
-def min_max_scaling(value: tf.Tensor,
-                    min_val: tf.Tensor,
-                    max_val: tf.Tensor) -> tf.Tensor:
-  return tf.divide(value - min_val, max_val - min_val)
-
-
 class TFFunctionEnvV3(tf_environment.TFEnvironment):
-  """Single-agent function environment as a POMDP for smooth convex functions.
-    Observations are log(|grad(x)|), sng(grad(x)).
-    Actions are dX.
-    States (s) are x, grad_at(x), f(x), expected_min, expected_max plus
-      other hidden (unknown) states.
-    Reward function is
-      R(s_t, a_t, s_{t+1}) = -f(x_{t+1})
+  """Single-agent function environment as a POMDP for Learning global
+  optimization.
+    Observations: log(|grad_t|), sng(grad_t), (x_t - x_0)/t.
+    Actions: deltaX.
+    States: x_t,
+            fx_t,
+            {(x_0, fx_0, grads_0), ..., (x_{t-1}, fx_{t-1}, grads_{t-1})},
+            other unknown hidden states.
+    Reward: R(s_t, a_t, s_{t+1}) = -sgn(y)*log_10(1 + |y*ln(10)|),
+            where y = fx_{t+1}
     """
 
   def __init__(self,
@@ -39,7 +36,6 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
                seed,
                duration: int = 50000,
                action_bounds: typing.Tuple[float, float] = None,
-               num_x_samples_reset: int = 100,
                alg=tf.random.Algorithm.PHILOX):
     self._fn_dist = fn_dist
     self._fn_dist.enable_tf_function()
@@ -58,8 +54,8 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
       action_spec = specs.TensorSpec(shape=tf.TensorShape([self._dims]),
                                      dtype=tf.float32,
                                      name='action')
-
-    observation_spec = specs.TensorSpec(shape=tf.TensorShape([2 * self._dims]),
+    # 3 * dims: [grad_mag_dims] + [grad_sign_dims] + [velocity_dim]
+    observation_spec = specs.TensorSpec(shape=tf.TensorShape([3 * self._dims]),
                                         dtype=tf.float32,
                                         name='observation')
 
@@ -80,89 +76,85 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     self._duration = tf.constant(value=duration,
                                  dtype=tf.int32,
                                  name='duration')
-    self._num_x_samples_reset = tf.constant(value=num_x_samples_reset,
-                                            dtype=tf.int32,
-                                            name="num_x_samples_reset")
 
-    # Hidden state
+    # States
+    self._x0 = common.create_variable(name='x0',
+                                      shape=tf.TensorShape([self._dims]),
+                                      initial_value=0,
+                                      dtype=tf.float32)
     self._x = common.create_variable(name='x',
                                      shape=tf.TensorShape([self._dims]),
                                      initial_value=0,
                                      dtype=tf.float32)
-    self._fx_t = common.create_variable(name='fx_t',
-                                        shape=(),
-                                        initial_value=0,
-                                        dtype=tf.float32)
-    self._fx_t1 = common.create_variable(name='fx_t1',
-                                         shape=(),
-                                         initial_value=0,
-                                         dtype=tf.float32)
-    self._known_min = common.create_variable(name='known_min',
-                                             shape=(),
-                                             initial_value=0,
-                                             dtype=tf.float32)
-    self._known_max = common.create_variable(name='known_max',
-                                             shape=(),
-                                             initial_value=0,
-                                             dtype=tf.float32)
+    self._fx = common.create_variable(name='fx',
+                                      shape=(),
+                                      initial_value=0,
+                                      dtype=tf.float32)
 
-    def update_reset_min_max():
-      rng_xs = self._rng.uniform(
-        shape=tf.TensorShape(
-          self._num_x_samples_reset).concatenate([self._dims]),
-        minval=self._domain[0],
-        maxval=self._domain[1],
-        dtype=tf.float32)
-      fxs = tf.map_fn(lambda x: self._fn_dist(x), rng_xs)
-      self._known_max.assign(tf.reduce_max(fxs))
-      self._known_min.assign(tf.reduce_min(fxs))
-
-    self._update_reset_min_max = update_reset_min_max
-
-    def update_min_max(fx: tf.Tensor):
-      self._known_max.assign(
-        tf.cond(pred=tf.math.greater(fx, self._known_max),
-                true_fn=lambda: fx,
-                false_fn=self._known_max.value))
-
-      self._known_min.assign(
-        tf.cond(pred=tf.math.less(fx, self._known_min),
-                true_fn=lambda: fx,
-                false_fn=self._known_min.value))
-
-    self._update_min_max = update_min_max
-
-    # Observable state
+    # Observations
     self._grads_at_x = common.create_variable(
       name='grads_at_x',
       shape=tf.TensorShape([self._dims]),
       initial_value=0,
       dtype=tf.float32)
 
+    self._avg_velocity = common.create_variable(
+      name='avg_velocity',
+      shape=tf.TensorShape([self._dims]),
+      initial_value=0,
+      dtype=tf.float32)
+
+    # Observations utilities
+    self._p = tf.constant(10, dtype=tf.float32)
+
+    def log_processing(g: tf.Tensor):
+      abs_g = tf.abs(g)
+      return tf.cond(pred=tf.greater_equal(abs_g,
+                                           tf.math.exp(-self._p)),
+                     true_fn=lambda: tf.math.divide(tf.math.log(abs_g),
+                                                    self._p),
+                     false_fn=lambda: tf.constant(-1.0, dtype=tf.float32))
+
+    def sign_processing(g: tf.Tensor):
+      return tf.cond(pred=tf.greater_equal(tf.abs(g),
+                                           tf.math.exp(-self._p)),
+                     true_fn=lambda: tf.sign(g),
+                     false_fn=lambda: tf.multiply(g,
+                                                  tf.math.exp(-self._p)))
+
+    self._log_processing_fn = log_processing
+    self._sign_processing_fn = sign_processing
+
+    # Reward function utilities
+    self._b = tf.constant(10, dtype=tf.float32)
+    self._c = tf.constant(tf.math.reciprocal(tf.math.log(self._b)),
+                          dtype=tf.float32)
+
+    def bi_symmetrical_log(fx):
+      log_10 = tf.divide(
+        tf.math.log(tf.math.add(tf.abs(fx / self._c), 1)),
+        tf.math.log(self._b))
+      return tf.math.multiply(tf.sign(fx), log_10)
+
+    self._reward_transformation_fn = bi_symmetrical_log
+
   def _current_time_step(self) -> ts.TimeStep:
     grads = self._grads_at_x.value()
-    fx_t1 = self._fx_t1.value()
+    fx = self._fx.value()
+    x0 = self._x0.value()
+    x = self._x.value()
+    t = tf.cast(self._steps_taken.value(), dtype=tf.float32)
 
     with tf.control_dependencies([grads]):
-      def log_processing(g: tf.Tensor):
-        abs_g = tf.abs(g)
-        p = tf.constant(10, dtype=tf.float32)
-        return tf.cond(pred=tf.greater_equal(abs_g, tf.math.exp(-p)),
-                       true_fn=lambda: tf.math.divide(tf.math.log(abs_g), p),
-                       false_fn=lambda: tf.constant(-1.0, dtype=tf.float32))
+      log_grad = tf.map_fn(self._log_processing_fn, grads)
+      sign_grad = tf.map_fn(self._sign_processing_fn, grads)
 
-      def sign_processing(g: tf.Tensor):
-        p = tf.constant(10, dtype=tf.float32)
-        return tf.cond(pred=tf.greater_equal(tf.abs(g), tf.math.exp(-p)),
-                       true_fn=lambda: tf.sign(g),
-                       false_fn=lambda: tf.multiply(g, tf.math.exp(-p)))
+    with tf.control_dependencies([x0, x, t]):
+      avg_velocity = tf.math.divide_no_nan(x - x0, t)
 
-      log_grad = tf.map_fn(log_processing, grads)
-      sign_grad = tf.map_fn(sign_processing, grads)
-
-      with tf.control_dependencies([log_grad, sign_grad]):
-        observation = tf.concat([log_grad, sign_grad], axis=-1,
-                                name='log_sign_grad_concat')
+    with tf.control_dependencies([log_grad, sign_grad, avg_velocity]):
+      observation = tf.concat([log_grad, sign_grad, avg_velocity], axis=-1,
+                              name='observation_concat')
 
     def first():
       return (tf.constant(FIRST, dtype=tf.int32),
@@ -170,15 +162,15 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
 
     def mid():
       return (tf.constant(MID, dtype=tf.int32),
-              tf.reshape(-fx_t1,
+              tf.reshape(-self._reward_transformation_fn(fx),
                          shape=()))
 
     def last():
       return (tf.constant(LAST, dtype=tf.int32),
-              tf.reshape(-fx_t1,
+              tf.reshape(-self._reward_transformation_fn(fx),
                          shape=()))
 
-    with tf.control_dependencies([fx_t1]):
+    with tf.control_dependencies([fx]):
       discount = tf.constant(1.0, dtype=tf.float32)
       step_type, reward = tf.case(
         [(tf.math.less_equal(self._steps_taken, 0), first),
@@ -203,23 +195,24 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     with tf.control_dependencies([reset_ended,
                                   reset_steps,
                                   current_domain]):
-      x_reset = self._x.assign(value=self._rng.uniform(
+      rng_x0 = self._rng.uniform(
         shape=tf.TensorShape([self._dims]),
         minval=current_domain[0],
         maxval=current_domain[1],
-        dtype=tf.float32))
+        dtype=tf.float32)
 
-      with tf.control_dependencies([x_reset]):
-        self._update_reset_min_max()
-        grad, fx = self._fn_dist.grads_at(x_reset.value())
+      with tf.control_dependencies([rng_x0]):
+        x0_reset = self._x0.assign(value=rng_x0)
+        x_reset = self._x.assign(value=rng_x0)
+
+      with tf.control_dependencies([x_reset, x0_reset]):
+        grad, fx = self._fn_dist.grads_at(x0_reset.value())
 
         with tf.control_dependencies([fx, grad]):
-          fx_t_reset = self._fx_t.assign(value=fx)
-          fx_t1_reset = self._fx_t1.assign(value=fx)
+          fx_reset = self._fx.assign(value=fx)
           grads_x_reset = self._grads_at_x.assign(value=grad)
 
-          with tf.control_dependencies([fx_t_reset,
-                                        fx_t1_reset,
+          with tf.control_dependencies([fx_reset,
                                         grads_x_reset]):
             time_step = self.current_time_step()
             return time_step
@@ -242,17 +235,13 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
       with tf.control_dependencies([new_x]):
         x_update = self._x.assign(new_x)
         grads, fx = self._fn_dist.grads_at(new_x)
-        fx_t1_value = self._fx_t1.value()
 
-        with tf.control_dependencies([fx, grads, fx_t1_value]):
-          fx_t_update = self._fx_t.assign(fx_t1_value)
-          fx_t1_update = self._fx_t1.assign(fx)
+        with tf.control_dependencies([fx, grads]):
+          fx_update = self._fx.assign(fx)
           grads_update = self._grads_at_x.assign(grads)
-          self._update_min_max(fx)
 
       with tf.control_dependencies([x_update,
-                                    fx_t_update,
-                                    fx_t1_update,
+                                    fx_update,
                                     grads_update,
                                     steps_update,
                                     episode_finished]):
@@ -264,16 +253,6 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     return tf.cond(pred=tf.math.reduce_any(self._episode_ended),
                    true_fn=reset_env,
                    false_fn=take_step)
-
-  @property
-  @autograph.do_not_convert()
-  def functions(self):
-    return self._functions
-
-  @property
-  @autograph.do_not_convert()
-  def fn_index(self):
-    return self._fn_index
 
   @autograph.do_not_convert()
   def get_info(self, to_numpy=False):
