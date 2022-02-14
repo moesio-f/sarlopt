@@ -55,6 +55,9 @@ class UniformFunctionDistribution(FunctionDistribution):
       lambda f: lambda: f(x),
       self._fns)
 
+    self._fns_names = tf.constant([f.name for f in
+                                   self._fns],
+                                  dtype=tf.string)
     self._domains = tf.constant([(f.domain.min, f.domain.max) for f in
                                  self._fns],
                                 dtype=dtype)
@@ -250,11 +253,41 @@ class UniformFunctionDistribution(FunctionDistribution):
   def current_domain(self) -> tf.Tensor:
     cls_index = self._class_index.value()
     fn_index = self._fn_index.value()
+    hshift = self._hshift.value()
 
     with tf.control_dependencies([cls_index, fn_index]):
       index = self._flat_indice_mapper(cls_index, fn_index)
-      with tf.control_dependencies([index]):
-        return tf.gather(self._domains, index)
+
+    with tf.control_dependencies([index]):
+      domain = tf.gather(self._domains, index)
+
+    with tf.control_dependencies([domain, hshift]):
+      lower = tf.cast(tf.broadcast_to(domain[0], hshift.shape) - hshift,
+                      dtype=self._dtype)
+      upper = tf.cast(tf.broadcast_to(domain[1], hshift.shape) - hshift,
+                      dtype=self._dtype)
+      with tf.control_dependencies([lower, upper]):
+        return tf.stack([lower, upper],
+                        axis=0)
+
+  @property
+  def current_function(self) -> tf.Tensor:
+    cls_index = self._class_index.value()
+    fn_index = self._fn_index.value()
+
+    with tf.control_dependencies([cls_index, fn_index]):
+      index = self._flat_indice_mapper(cls_index, fn_index)
+    with tf.control_dependencies([index]):
+      return tf.gather(self._fns_names, index)
+
+  @property
+  def current_parameters(self) -> typing.Tuple[tf.Tensor]:
+    hshift = self._hshift.value()
+    vshift = self._vshift.value()
+    scale = self._scale.value()
+
+    with tf.control_dependencies([hshift, vshift, scale]):
+      return hshift, vshift, scale
 
   def __call__(self, x: tf.Tensor) -> tf.Tensor:
     return self._fn(x)

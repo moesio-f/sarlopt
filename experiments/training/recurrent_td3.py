@@ -38,6 +38,22 @@ class DistributionBounds(typing.NamedTuple):
   dims_params: int
 
 
+class ActorNetworkParams(typing.NamedTuple):
+  input_fc_layer_params: typing.Optional[typing.List[int]]
+  lstm_size: typing.Optional[typing.List[int]]
+  output_fc_layer_params: typing.Optional[typing.List[int]]
+  activation_fn: typing.Optional[typing.Any]
+
+
+class CriticNetworkParams(typing.NamedTuple):
+  observation_fc_layer_params: typing.Optional[typing.List[int]]
+  action_fc_layer_params: typing.Optional[typing.List[int]]
+  joint_fc_layer_params: typing.Optional[typing.List[int]]
+  lstm_size: typing.Optional[typing.List[int]]
+  output_fc_layer_params: typing.Optional[typing.List[int]]
+  activation_fn: typing.Optional[typing.Any]
+
+
 def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
                               function: tff.TensorflowFunction,
                               dims: int,
@@ -60,7 +76,7 @@ def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
                              shape=(),
                              initial_value=0,
                              dtype=tf.int32)
-  steps = tf.convert_to_tensor(steps, dtype=tf.int32)
+  steps = tf.constant(steps, shape=(), dtype=tf.int32)
 
   p = tf.constant(10, dtype=tf.float32)
 
@@ -77,10 +93,13 @@ def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
 
   def observation_to_time_step(observation) -> ts.TimeStep:
     return nest_utils.batch_nested_tensors(
-          ts.TimeStep(step_type=ts.StepType.MID,
-                      reward=0.0,
-                      discount=tf.constant(1.0, dtype=tf.float32),
-                      observation=observation))
+      ts.TimeStep(step_type=ts.StepType.MID,
+                  reward=tf.constant(0.0, dtype=tf.float32),
+                  discount=tf.constant(1.0, dtype=tf.float32),
+                  observation=observation))
+
+  def mask_nan_grads(grads: tf.Tensor):
+    return tf.where(tf.math.is_finite(grads), grads, tf.zeros_like(grads))
 
   @tf.function(autograph=True)
   def run_episode():
@@ -104,6 +123,7 @@ def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
         best_fx.assign(fx)
         best_x.assign(x)
 
+      grads = mask_nan_grads(grads)
       log_grad = tf.map_fn(log_processing, grads)
       sign_grad = tf.map_fn(sign_processing, grads)
       avg_velocity = tf.math.divide_no_nan(x - x0, tf.cast(t, dtype=tf.float32))
@@ -132,15 +152,17 @@ def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
 
   for ep in range(episodes):
     best_value, best_solution = run_episode()
-    best_values.append(best_value.numpy())
-    best_solutions.append(best_solution.numpy())
+    best_values.append(np.copy(best_value.numpy()))
+    best_solutions.append(np.copy(best_solution.numpy()))
 
   avg_best_values = np.mean(best_values, axis=0)
+  stddev_best_values = np.std(best_values, axis=0)
   avg_best_solutions = np.mean(best_solutions, axis=0)
-  print('Average best value: {0}'.format(avg_best_values))
+  print('Average best value: {0} (+- {1}) '.format(avg_best_values,
+                                                   stddev_best_values))
   print('Average best solution: {0}'.format(avg_best_solutions))
 
-  return avg_best_values, avg_best_solutions
+  return avg_best_values, avg_best_solutions, best_values, best_solutions
 
 
 def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
@@ -148,6 +170,8 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
                         dims: int,
                         actions_bounds: typing.Tuple[float, float],
                         train_sequence_length: int,
+                        curriculum_strategy: typing.List[
+                          typing.Tuple[int, int]] = None,
                         seed=1000,
                         training_episodes: int = 2000,
                         stop_threshold: float = None,
@@ -157,7 +181,7 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
                         eval_episodes: int = 10,
                         initial_collect_episodes: int = 20,
                         collect_steps_per_iteration: int = 1,
-                        buffer_size: int = 1000000,
+                        buffer_size: int = 10000000,
                         batch_size: int = 64,
                         actor_lr: float = 3e-4,
                         critic_lr: float = 3e-4,
@@ -165,13 +189,12 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
                         actor_update_period: int = 2,
                         target_update_period: int = 2,
                         discount: float = 0.99,
+                        gradient_clip_norm: typing.Optional[float] = None,
                         exploration_noise_std: float = 0.1,
                         target_policy_noise: float = 0.2,
                         target_policy_noise_clip: float = 0.5,
-                        actor_layers: LayerParam = None,
-                        critic_action_layers: LayerParam = None,
-                        critic_observation_layers: LayerParam = None,
-                        critic_joint_layers: LayerParam = None,
+                        actor_net_params: ActorNetworkParams = None,
+                        critic_net_params: CriticNetworkParams = None,
                         summary_flush_secs: int = 10,
                         debug_summaries: bool = False,
                         summarize_grads_and_vars: bool = False):
@@ -192,16 +215,21 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
     dims_params=dist_bounds.dims_params)
 
   # Creating the environments.
-  tf_env_training = tf_fun_env.TFFunctionEnvV3(fn_dist=fn_dist,
-                                               dims=dims,
-                                               seed=seed,
-                                               duration=env_steps,
-                                               action_bounds=actions_bounds)
-  tf_env_eval = tf_fun_env.TFFunctionEnvV3(fn_dist=fn_dist,
-                                           dims=dims,
-                                           seed=seed,
-                                           duration=env_eval_steps,
-                                           action_bounds=actions_bounds)
+  tf_env_training = tf_fun_env.TFFunctionEnvV3(
+    fn_dist=fn_dist,
+    dims=dims,
+    seed=seed,
+    duration=env_steps,
+    action_bounds=actions_bounds,
+    curriculum_strategy=curriculum_strategy)
+
+  # Evaluation should sample from all possible optimizees.
+  tf_env_eval = tf_fun_env.TFFunctionEnvV3(
+    fn_dist=fn_dist,
+    dims=dims,
+    seed=seed,
+    duration=env_eval_steps,
+    action_bounds=actions_bounds)
 
   # Instantiating the SummaryWriter's
   print('Creating logs directories.')
@@ -227,32 +255,38 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
   act_spec = tf_env_training.action_spec()
   time_spec = tf_env_training.time_step_spec()
 
-  if actor_layers is None:
-    actor_layers = [256, 256]
-
-  actor_activation_fn = tf.keras.activations.relu
+  if actor_net_params is None:
+    actor_net_params = ActorNetworkParams(
+      input_fc_layer_params=[256, 256],
+      lstm_size=[128],
+      output_fc_layer_params=[256, 256],
+      activation_fn=tf.keras.activations.relu)
 
   actor_network = actor_net.ActorRnnNetwork(
     input_tensor_spec=obs_spec,
     output_tensor_spec=act_spec,
-    input_fc_layer_params=actor_layers,
-    lstm_size=(40,),
-    output_fc_layer_params=(200, 100),
-    activation_fn=actor_activation_fn)
+    input_fc_layer_params=actor_net_params.input_fc_layer_params,
+    lstm_size=actor_net_params.lstm_size,
+    output_fc_layer_params=actor_net_params.output_fc_layer_params,
+    activation_fn=actor_net_params.activation_fn)
 
-  if critic_joint_layers is None:
-    critic_joint_layers = [256, 256]
-
-  critic_activation_fn = tf.keras.activations.relu
+  if critic_net_params is None:
+    critic_net_params = CriticNetworkParams(
+      observation_fc_layer_params=[256],
+      action_fc_layer_params=[256],
+      joint_fc_layer_params=[128],
+      lstm_size=[128],
+      output_fc_layer_params=[256, 128],
+      activation_fn=tf.keras.activations.relu)
 
   critic_network = critic_net.CriticRnnNetwork(
     input_tensor_spec=(obs_spec, act_spec),
-    observation_fc_layer_params=(200,),
-    action_fc_layer_params=(200,),
-    joint_fc_layer_params=(100,),
-    lstm_size=(40,),
-    output_fc_layer_params=(200, 100),
-    activation_fn=critic_activation_fn)
+    observation_fc_layer_params=critic_net_params.observation_fc_layer_params,
+    action_fc_layer_params=critic_net_params.action_fc_layer_params,
+    joint_fc_layer_params=critic_net_params.joint_fc_layer_params,
+    lstm_size=critic_net_params.lstm_size,
+    output_fc_layer_params=critic_net_params.output_fc_layer_params,
+    activation_fn=critic_net_params.activation_fn)
 
   actor_optimizer = tf.keras.optimizers.Adam(learning_rate=actor_lr)
   critic_optimizer = tf.keras.optimizers.Adam(learning_rate=critic_lr)
@@ -274,6 +308,7 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
     target_update_period=target_update_period,
     train_step_counter=train_step,
     gamma=discount,
+    gradient_clipping=gradient_clip_norm,
     debug_summaries=debug_summaries,
     summarize_grads_and_vars=summarize_grads_and_vars)
 
@@ -358,15 +393,19 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
     "networks": {
       "actor_net": {
         "class": type(actor_network).__name__,
-        "activation_fn": actor_activation_fn.__name__,
-        "actor_layers": actor_layers
+        "activation_fn": actor_net_params.activation_fn.__name__,
+        "input_fc_layer_params": actor_net_params.input_fc_layer_params,
+        "lstm_size": actor_net_params.lstm_size,
+        "output_fc_layer_params": actor_net_params.output_fc_layer_params
       },
       "critic_net": {
         "class": type(critic_network).__name__,
-        "activation_fn": critic_activation_fn.__name__,
-        "critic_action_fc_layers": critic_action_layers,
-        "critic_obs_fc_layers": critic_observation_layers,
-        "critic_joint_layers": critic_joint_layers
+        "activation_fn": critic_net_params.activation_fn.__name__,
+        "action_fc_layers": critic_net_params.action_fc_layer_params,
+        "obs_fc_layers": critic_net_params.observation_fc_layer_params,
+        "lstm_size": critic_net_params.lstm_size,
+        "joint_layers": critic_net_params.joint_fc_layer_params,
+        "output_fc_layer_params": critic_net_params.output_fc_layer_params
       }
     },
     "algorithm": type(agent).__name__,
@@ -421,14 +460,6 @@ if __name__ == '__main__':
   train_recurrent_td3(functions=[[tff.SchumerSteiglitz(),
                                   tff.SumSquares(),
                                   tff.PowellSum()],
-                                 [tff.ChungReynolds(),
-                                  tff.Schwefel()],
-                                 [tff.Brown(),
-                                  tff.DixonPrice(),
-                                  tff.Schwefel12(),
-                                  tff.Schwefel222(),
-                                  tff.Schwefel223(),
-                                  tff.StrechedVSineWave()],
                                  [tff.Alpine2(),
                                   tff.Csendes(),
                                   tff.Deb1(),
@@ -436,15 +467,7 @@ if __name__ == '__main__':
                                   tff.Qing(),
                                   tff.Schwefel226(),
                                   tff.WWavy(),
-                                  tff.Weierstrass()],
-                                 [tff.Exponential(),
-                                  tff.Mishra2(),
-                                  tff.Salomon(),
-                                  tff.Sargan(),
-                                  tff.Trigonometric2(),
-                                  tff.Whitley(),
-                                  tff.Zakharov()]
-                                 ],
+                                  tff.Weierstrass()]],
                       actions_bounds=(-1.0, 1.0),
                       dist_bounds=DistributionBounds(
                         vshift_bounds=(-5.0, 5.0),
@@ -452,6 +475,19 @@ if __name__ == '__main__':
                         scale_bounds=(0.5, 1.5),
                         dims_params=2),
                       dims=2,
+                      curriculum_strategy=[(0, 0), (101, 1)],
+                      gradient_clip_norm=1.0,
+                      env_steps=50,
+                      env_eval_steps=200,
                       train_sequence_length=10,
                       seed=0,
-                      training_episodes=500)
+                      training_episodes=300)
+  # Problems with functions:
+  #   Rosenbrock; (Fixed, removed batch)
+  #   Dixon Price; (Fixed, removed batch)
+  #   Griewank; (Fixed, removed batch)
+  #   Levy; (Fixed, removed batch)
+  #   RotatedHyperEllipsoid; (Not fixed, need to review non-batched formulation)
+  # Temporary fix: remove batched inputs. It seems related to the map_fn(...),
+  #   however it's hard to find the real culprit. All functions that used
+  #   atleast_2d(...) had this problem.

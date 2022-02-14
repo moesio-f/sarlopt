@@ -20,7 +20,7 @@ LAST = ts.StepType.LAST
 class TFFunctionEnvV3(tf_environment.TFEnvironment):
   """Single-agent function environment as a POMDP for Learning global
   optimization.
-    Observations: log(|grad_t|), sng(grad_t), (x_t - x_0)/t.
+    Observations: log(|grad_t|), sng(grad_t), (x_t - x_0)/t (with safe_div).
     Actions: deltaX.
     States: x_t,
             fx_t,
@@ -34,13 +34,34 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
                fn_dist: fn_distributions.UniformFunctionDistribution,
                dims,
                seed,
+               curriculum_strategy: typing.List[typing.Tuple[int, int]] = None,
                duration: int = 50000,
                action_bounds: typing.Tuple[float, float] = None,
                alg=tf.random.Algorithm.PHILOX):
     self._fn_dist = fn_dist
     self._fn_dist.enable_tf_function()
 
-    self._domain = self._fn_dist.current_domain
+    self._use_curriculum = curriculum_strategy is not None
+    self._curriculum_cls = None
+    self._curriculum_eps = None
+    self._function_class_fn = None
+
+    if self._use_curriculum:
+      # Curriculum: [(start_ep, fn_cls), ....]
+      self._curriculum_cls = tf.constant(
+        [cls for (_, cls) in curriculum_strategy],
+        dtype=tf.int32)
+      self._curriculum_eps = tf.constant(
+        [eps for (eps, _) in curriculum_strategy],
+        dtype=tf.int32)
+
+      def get_class(e):
+        mask = tf.less(e, self._curriculum_eps)
+        return tf.boolean_mask(self._curriculum_cls, mask)[-1]
+
+      self._function_class_fn = get_class
+
+    self._domain_fn = lambda: self._fn_dist.current_domain
     self._dims = dims
 
     if action_bounds is not None:
@@ -70,12 +91,30 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     self._episode_ended = common.create_variable(name='episode_ended',
                                                  initial_value=False,
                                                  dtype=tf.bool)
+    self._total_episodes = common.create_variable(name='total_episodes',
+                                                 initial_value=0,
+                                                 dtype=tf.int32)
     self._steps_taken = common.create_variable(name='steps_taken',
                                                initial_value=0,
                                                dtype=tf.int32)
     self._duration = tf.constant(value=duration,
                                  dtype=tf.int32,
                                  name='duration')
+
+    @tf.function(autograph=True)
+    def sample_fn():
+      if self._use_curriculum:
+        ep = self._total_episodes.value()
+        with tf.control_dependencies([ep]):
+          fn_class = self._function_class_fn(ep)
+        with tf.control_dependencies([fn_class]):
+          self._fn_dist.sample_from_class(fn_class)
+          return tf.constant(1)
+      else:
+        self._fn_dist.sample()
+        return tf.constant(0)
+
+    self._maybe_sample_with_curriculum = sample_fn
 
     # States
     self._x0 = common.create_variable(name='x0',
@@ -125,6 +164,11 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     self._log_processing_fn = log_processing
     self._sign_processing_fn = sign_processing
 
+    def mask_nan_grads(grads: tf.Tensor):
+      return tf.where(tf.math.is_finite(grads), grads, tf.zeros_like(grads))
+
+    self._mask_nan_grads_fn = mask_nan_grads
+
     # Reward function utilities
     self._b = tf.constant(10, dtype=tf.float32)
     self._c = tf.constant(tf.math.reciprocal(tf.math.log(self._b)),
@@ -145,9 +189,18 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
     x = self._x.value()
     t = tf.cast(self._steps_taken.value(), dtype=tf.float32)
 
+    tf.debugging.check_numerics(x0, message='x0 is NaN/Inf')
+    tf.debugging.check_numerics(x, message='x is NaN/Inf')
+    tf.debugging.check_numerics(fx, message='fx is NaN/Inf.')
+
     with tf.control_dependencies([grads]):
-      log_grad = tf.map_fn(self._log_processing_fn, grads)
-      sign_grad = tf.map_fn(self._sign_processing_fn, grads)
+      masked_grads = self._mask_nan_grads_fn(grads)
+      tf.debugging.check_numerics(masked_grads,
+                                  message='masked_grads is NaN/Inf')
+
+      with tf.control_dependencies([masked_grads]):
+        log_grad = tf.map_fn(self._log_processing_fn, masked_grads)
+        sign_grad = tf.map_fn(self._sign_processing_fn, masked_grads)
 
     with tf.control_dependencies([x0, x, t]):
       avg_velocity = tf.math.divide_no_nan(x - x0, t)
@@ -189,8 +242,10 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
   def _reset(self) -> ts.TimeStep:
     reset_ended = self._episode_ended.assign(value=False)
     reset_steps = self._steps_taken.assign(value=0)
-    self._fn_dist.sample()
-    current_domain = self._fn_dist.current_domain
+    sample_op = self._maybe_sample_with_curriculum()
+
+    with tf.control_dependencies([sample_op]):
+      current_domain = self._domain_fn()
 
     with tf.control_dependencies([reset_ended,
                                   reset_steps,
@@ -226,11 +281,12 @@ class TFFunctionEnvV3(tf_environment.TFEnvironment):
         pred=tf.math.greater_equal(self._steps_taken, self._duration),
         true_fn=lambda: self._episode_ended.assign(True),
         false_fn=self._episode_ended.value)
+      current_domain = self._domain_fn()
 
-      with tf.control_dependencies([action, self._domain]):
+      with tf.control_dependencies([action, current_domain]):
         new_x = tf.clip_by_value(self._x + action,
-                                 clip_value_min=self._domain[0],
-                                 clip_value_max=self._domain[1])
+                                 clip_value_min=current_domain[0],
+                                 clip_value_max=current_domain[1])
 
       with tf.control_dependencies([new_x]):
         x_update = self._x.assign(new_x)
