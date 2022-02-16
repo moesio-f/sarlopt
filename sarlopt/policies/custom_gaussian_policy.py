@@ -11,7 +11,7 @@ from tf_agents.trajectories import policy_step
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
 
-from src.distributions import custom_normal
+from sarlopt.distributions import custom_normal
 
 
 class CustomGaussianPolicy(tf_policy.TFPolicy):

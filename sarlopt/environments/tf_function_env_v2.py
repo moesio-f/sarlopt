@@ -1,4 +1,6 @@
-"""TFEnvironments for function optimization with RL."""
+"""TFEnvironment for function optimization with RL using POMDP."""
+
+import typing
 
 import tensorflow as tf
 from tensorflow.python.autograph.impl import api as autograph
@@ -7,7 +9,6 @@ from tf_agents.environments import tf_environment
 from tf_agents.trajectories import time_step as ts
 from tf_agents.utils import common, nest_utils
 
-from optfuncs import core
 from optfuncs import tensorflow_functions as tff
 
 FIRST = ts.StepType.FIRST
@@ -15,20 +16,37 @@ MID = ts.StepType.MID
 LAST = ts.StepType.LAST
 
 
-class TFFunctionEnv(tf_environment.TFEnvironment):
-  """Single-agent function environment."""
+class TFFunctionEnvV2(tf_environment.TFEnvironment):
+  """Single-agent function environment as a POMDP."""
 
-  def __init__(self, function: tff.TensorflowFunction,
+  @autograph.do_not_convert()
+  def __init__(self,
+               functions: typing.List[tff.TensorflowFunction],
                dims,
                seed,
                duration: int = 50000,
                bounded_actions_spec: bool = True,
                alg=tf.random.Algorithm.PHILOX):
-    self._function = function
-    self._function.enable_tf_function()
-    self._domain_min = tf.cast(function.domain.min, tf.float32)
-    self._domain_max = tf.cast(function.domain.max, tf.float32)
+    self._functions = functions
+    for fn in self._functions:
+      fn.enable_tf_function()
+
+    self._fn_index = common.create_variable(name='fn_index',
+                                            initial_value=0,
+                                            dtype=tf.int32)
+
+    self._fn_evaluator = lambda x: tf.nest.map_structure(
+      lambda f: lambda: f(x),
+      self._functions)
+
+    self._domain_min = tf.cast(
+      self._functions[0].domain.min,
+      tf.float32)
+    self._domain_max = tf.cast(
+      self._functions[0].domain.max,
+      tf.float32)
     self._dims = dims
+    self._n_functions = len(self._functions)
 
     action_spec = specs.BoundedTensorSpec(shape=(self._dims,), dtype=tf.float32,
                                           minimum=-1.0,
@@ -60,6 +78,7 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
     self._duration = tf.constant(value=duration,
                                  dtype=tf.int32,
                                  name='duration')
+
     self._state = common.create_variable(
       name='state',
       initial_value=self._rng.uniform(
@@ -69,8 +88,18 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
         dtype=tf.float32),
       dtype=tf.float32)
 
+    self._fn_index.assign(value=self._rng.uniform(
+      shape=(),
+      minval=0,
+      maxval=self._n_functions,
+      dtype=tf.int32))
+
   def _current_time_step(self) -> ts.TimeStep:
     state = self._state.value()
+    fn_index = self._fn_index.value()
+
+    with tf.control_dependencies([state]):
+      branches = self._fn_evaluator(state)
 
     def first():
       return (tf.constant(FIRST, dtype=tf.int32),
@@ -78,18 +107,21 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
 
     def mid():
       return (tf.constant(MID, dtype=tf.int32),
-              tf.reshape(tf.math.negative(self._function(state)), shape=()))
+              tf.reshape(tf.math.negative(tf.switch_case(fn_index, branches)),
+                         shape=()))
 
     def last():
       return (tf.constant(LAST, dtype=tf.int32),
-              tf.reshape(tf.math.negative(self._function(state)), shape=()))
+              tf.reshape(tf.math.negative(tf.switch_case(fn_index, branches)),
+                         shape=()))
 
-    discount = tf.constant(1.0, dtype=tf.float32)
-    step_type, reward = tf.case(
-      [(tf.math.less_equal(self._steps_taken, 0), first),
-       (tf.math.reduce_any(self._episode_ended), last)],
-      default=mid,
-      exclusive=True, strict=True)
+    with tf.control_dependencies([branches]):
+      discount = tf.constant(1.0, dtype=tf.float32)
+      step_type, reward = tf.case(
+        [(tf.math.less_equal(self._steps_taken, 0), first),
+         (tf.math.reduce_any(self._episode_ended), last)],
+        default=mid,
+        exclusive=True, strict=True)
 
     return nest_utils.batch_nested_tensors(ts.TimeStep(step_type=step_type,
                                                        reward=reward,
@@ -108,7 +140,14 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
           minval=self._domain_min,
           maxval=self._domain_max,
           dtype=tf.float32))
-    with tf.control_dependencies([state_reset]):
+      index_reset = self._fn_index.assign(
+        value=self._rng.uniform(
+          shape=(),
+          minval=0,
+          maxval=self._n_functions,
+          dtype=tf.int32))
+
+    with tf.control_dependencies([state_reset, index_reset]):
       time_step = self.current_time_step()
 
     return time_step
@@ -124,13 +163,15 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
 
       with tf.control_dependencies([new_state]):
         state_update = self._state.assign(new_state)
-        self._steps_taken.assign_add(1)
+        steps_update = self._steps_taken.assign_add(1)
         episode_finished = tf.cond(
           pred=tf.math.greater_equal(self._steps_taken, self._duration),
           true_fn=lambda: self._episode_ended.assign(True),
           false_fn=self._episode_ended.value)
 
-      with tf.control_dependencies([state_update, episode_finished]):
+      with tf.control_dependencies([state_update,
+                                    steps_update,
+                                    episode_finished]):
         return self.current_time_step()
 
     def reset_env():
@@ -139,6 +180,16 @@ class TFFunctionEnv(tf_environment.TFEnvironment):
     return tf.cond(pred=tf.math.reduce_any(self._episode_ended),
                    true_fn=reset_env,
                    false_fn=take_step)
+
+  @property
+  @autograph.do_not_convert()
+  def functions(self):
+    return self._functions
+
+  @property
+  @autograph.do_not_convert()
+  def fn_index(self):
+    return self._fn_index
 
   @autograph.do_not_convert()
   def get_info(self, to_numpy=False):

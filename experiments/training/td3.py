@@ -15,9 +15,9 @@ from tf_agents.metrics import tf_metrics
 
 from optfuncs import tensorflow_functions as tff
 
-from src.environments import tf_function_environment as tf_fun_env
-from src.metrics import tf_custom_metrics
-from src.typing.types import LayerParam
+from sarlopt.environments import tf_function_env as tf_fun_env
+from sarlopt.metrics import tf_custom_metrics
+from sarlopt.typing.types import LayerParam
 
 from experiments.evaluation import utils as eval_utils
 from experiments.training import utils as training_utils

@@ -7,7 +7,7 @@ from tf_agents.environments import utils as env_utils
 from tf_agents.trajectories.time_step import StepType
 from tf_agents.utils import test_utils
 
-from src.environments.py_function_environment import PyFunctionEnv
+from sarlopt.environments.py_function_env import PyFunctionEnv
 
 
 class DummyFunction(core.Function):
