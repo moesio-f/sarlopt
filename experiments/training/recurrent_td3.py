@@ -1,4 +1,4 @@
-"""Recurrent TD3 for l2o."""
+"""Recurrent TD3 for L2O."""
 
 import time
 import typing
@@ -17,15 +17,14 @@ from tf_agents.utils import common
 from tf_agents.metrics import tf_metrics
 from tf_agents.policies import tf_policy
 from tf_agents.trajectories import trajectory
-from tf_agents.utils import nest_utils
 
 from optfuncs import tensorflow_functions as tff
 
 from sarlopt.environments import tf_function_env_v3 as tf_fun_env
-from sarlopt.typing.types import LayerParam
 from sarlopt.utils.functions import distributions as fn_distributions
 
 from experiments.evaluation import utils as eval_utils
+from experiments.evaluation import tf_env3_evaluation
 from experiments.training import utils as training_utils
 
 ts = trajectory.ts
@@ -52,117 +51,6 @@ class CriticNetworkParams(typing.NamedTuple):
   lstm_size: typing.Optional[typing.List[int]]
   output_fc_layer_params: typing.Optional[typing.List[int]]
   activation_fn: typing.Optional[typing.Any]
-
-
-def evaluate_recurrent_policy(policy: tf_policy.TFPolicy,
-                              function: tff.TensorflowFunction,
-                              dims: int,
-                              steps: int,
-                              episodes: int):
-  rng = tf.random.Generator.from_non_deterministic_state()
-  x = common.create_variable(name='x',
-                             shape=tf.TensorShape([dims]),
-                             initial_value=0,
-                             dtype=tf.float32)
-  best_fx = common.create_variable(name='best_fx',
-                                   shape=(),
-                                   initial_value=tf.float32.max,
-                                   dtype=tf.float32)
-  best_x = common.create_variable(name='best_x',
-                                  shape=tf.TensorShape([dims]),
-                                  initial_value=0,
-                                  dtype=tf.float32)
-  t = common.create_variable(name='t',
-                             shape=(),
-                             initial_value=0,
-                             dtype=tf.int32)
-  steps = tf.constant(steps, shape=(), dtype=tf.int32)
-
-  p = tf.constant(10, dtype=tf.float32)
-
-  def log_processing(g: tf.Tensor):
-    abs_g = tf.abs(g)
-    return tf.cond(pred=tf.greater_equal(abs_g, tf.math.exp(-p)),
-                   true_fn=lambda: tf.math.divide(tf.math.log(abs_g), p),
-                   false_fn=lambda: tf.constant(-1.0, dtype=tf.float32))
-
-  def sign_processing(g: tf.Tensor):
-    return tf.cond(pred=tf.greater_equal(tf.abs(g), tf.math.exp(-p)),
-                   true_fn=lambda: tf.sign(g),
-                   false_fn=lambda: tf.multiply(g, tf.math.exp(-p)))
-
-  def observation_to_time_step(observation) -> ts.TimeStep:
-    return nest_utils.batch_nested_tensors(
-      ts.TimeStep(step_type=ts.StepType.MID,
-                  reward=tf.constant(0.0, dtype=tf.float32),
-                  discount=tf.constant(1.0, dtype=tf.float32),
-                  observation=observation))
-
-  def mask_nan_grads(grads: tf.Tensor):
-    return tf.where(tf.math.is_finite(grads), grads, tf.zeros_like(grads))
-
-  @tf.function(autograph=True)
-  def run_episode():
-    x0 = rng.uniform(
-      shape=tf.TensorShape([dims]),
-      minval=function.domain[0],
-      maxval=function.domain[1],
-      dtype=tf.float32)
-    x.assign(value=x0)
-    t.assign(value=0)
-    best_fx.assign(value=tf.float32.max)
-    best_x.assign(value=x0)
-
-    policy_state = policy.get_initial_state(batch_size=1)
-    fx = None
-
-    while tf.reduce_all(tf.less(t, steps)):
-      grads, fx = function.grads_at(x)
-
-      if tf.math.reduce_all(tf.math.less(fx, best_fx)):
-        best_fx.assign(fx)
-        best_x.assign(x)
-
-      grads = mask_nan_grads(grads)
-      log_grad = tf.map_fn(log_processing, grads)
-      sign_grad = tf.map_fn(sign_processing, grads)
-      avg_velocity = tf.math.divide_no_nan(x - x0, tf.cast(t, dtype=tf.float32))
-
-      obs = tf.concat([log_grad, sign_grad, avg_velocity], axis=-1,
-                      name='observation')
-      time_step = observation_to_time_step(obs)
-      policy_step = policy.action(time_step, policy_state)
-
-      action = tf.squeeze(policy_step.action)
-      policy_state = policy_step.state
-
-      x.assign(tf.clip_by_value(x + action,
-                                clip_value_min=function.domain[0],
-                                clip_value_max=function.domain[1]))
-      t.assign_add(1)
-
-    if tf.math.reduce_all(tf.math.less(fx, best_fx)):
-      best_fx.assign(fx)
-      best_x.assign(x)
-
-    return best_fx.value(), best_x.value()
-
-  best_values = []
-  best_solutions = []
-
-  for ep in range(episodes):
-    best_value, best_solution = run_episode()
-    best_values.append(np.copy(best_value.numpy()))
-    best_solutions.append(np.copy(best_solution.numpy()))
-
-  avg_best_values = np.mean(best_values, axis=0)
-  stddev_best_values = np.std(best_values, axis=0)
-  avg_best_solutions = np.mean(best_solutions, axis=0)
-  print('Average best value: {0} (+- {1}) '.format(avg_best_values,
-                                                   stddev_best_values))
-  print('Average best solution: {0}'.format(avg_best_solutions))
-
-  return avg_best_values, avg_best_solutions, best_values, best_solutions
 
 
 def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
@@ -452,7 +340,7 @@ def train_recurrent_td3(functions: typing.List[fn_distributions.FunctionList],
   compute_eval_metrics()
 
   # Saving the learned policy.
-  # Output directory: output/TD3-{dims}D-{function.name}-{num}/policy
+  # Output directory: output/Recurrent-TD3-{dims}D-distribution-{num}/policy
   training_utils.save_policy(agent_dir, agent.policy)
 
 
@@ -460,6 +348,14 @@ if __name__ == '__main__':
   train_recurrent_td3(functions=[[tff.SchumerSteiglitz(),
                                   tff.SumSquares(),
                                   tff.PowellSum()],
+                                 [tff.ChungReynolds(),
+                                  tff.Schwefel()],
+                                 [tff.Brown(),
+                                  tff.DixonPrice(),
+                                  tff.Schwefel12(),
+                                  tff.Schwefel222(),
+                                  tff.Schwefel223(),
+                                  tff.StrechedVSineWave()],
                                  [tff.Alpine2(),
                                   tff.Csendes(),
                                   tff.Deb1(),
@@ -467,21 +363,28 @@ if __name__ == '__main__':
                                   tff.Qing(),
                                   tff.Schwefel226(),
                                   tff.WWavy(),
-                                  tff.Weierstrass()]],
+                                  tff.Weierstrass()],
+                                 [tff.Exponential(),
+                                  tff.Mishra2(),
+                                  tff.Salomon(),
+                                  tff.Sargan(),
+                                  tff.Trigonometric2(),
+                                  tff.Whitley(),
+                                  tff.Zakharov()]
+                                 ],
                       actions_bounds=(-1.0, 1.0),
                       dist_bounds=DistributionBounds(
-                        vshift_bounds=(-5.0, 5.0),
-                        hshift_bounds=(-1.5, 1.5),
-                        scale_bounds=(0.5, 1.5),
+                        vshift_bounds=(0.0, 0.0),
+                        hshift_bounds=(0.0, 0.0),
+                        scale_bounds=(1.0, 1.0),
                         dims_params=2),
                       dims=2,
-                      curriculum_strategy=[(0, 0), (101, 1)],
                       gradient_clip_norm=1.0,
                       env_steps=50,
                       env_eval_steps=200,
                       train_sequence_length=10,
                       seed=0,
-                      training_episodes=300)
+                      training_episodes=100)
   # Problems with functions:
   #   Rosenbrock; (Fixed, removed batch)
   #   Dixon Price; (Fixed, removed batch)

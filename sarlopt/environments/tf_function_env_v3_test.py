@@ -91,11 +91,12 @@ class TFFunctionEnvV3Test(tf.test.TestCase):
       return tf.while_loop(cond=c, body=body, loop_vars=[time_step])
 
     [final_time_step_np] = self.evaluate(run_episode())
-    log_abs_grads = tf.constant([[0.61834264, 0.6255897]],
+    log_abs_grads = tf.constant([[0.62076, 0.636727]],
                                 dtype=tf.float32)
     sign_grads = tf.constant([[1.0, 1.0]],
                              dtype=tf.float32)
-    final_observation = tf.concat([log_abs_grads, sign_grads], axis=-1)
+    final_observation = tf.concat([log_abs_grads, sign_grads, action],
+                                  axis=-1)
 
     self.assertEqual(ts.StepType.LAST, final_time_step_np.step_type)
     self.assertAllClose(final_observation, final_time_step_np.observation)
