@@ -1,7 +1,7 @@
 """Tests for src.environments.py_function_environment."""
 
 import numpy as np
-from optfuncs import core
+from py_benchmark_functions import core
 from tf_agents.environments import utils as env_utils
 from tf_agents.trajectories.time_step import StepType
 from tf_agents.utils import test_utils

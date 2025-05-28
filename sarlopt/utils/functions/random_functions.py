@@ -3,8 +3,7 @@
 import typing
 
 import numpy as np
-from optfuncs import tensorflow_functions as tff
-from optfuncs import transformations_tensorflow as t_tff
+from py_benchmark_functions.imp import tensorflow as tff
 
 
 def random_shifted_functions(
@@ -19,7 +18,6 @@ def random_shifted_functions(
     hshifts = rng.uniform(hshift_bounds[0], hshift_bounds[1], n).astype(np.float32)
 
     def transformed_fn(v: float, h: float):
-        nonlocal src_fn
-        return t_tff.VerticalShift(t_tff.HorizontalShift(src_fn, h), v)
+        return tff.TensorflowTransformation(src_fn, vshift=v, hshift=h)
 
     return [transformed_fn(v, h) for v, h in zip(vshifts, hshifts)]

@@ -3,7 +3,7 @@
 import typing
 
 import tensorflow as tf
-from optfuncs import tensorflow_functions as tff
+from py_benchmark_functions.imp import tensorflow as tff
 from tensorflow.python.autograph.impl import api as autograph
 from tf_agents import specs
 from tf_agents.environments import tf_environment

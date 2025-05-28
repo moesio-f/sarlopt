@@ -3,8 +3,8 @@
 from math import pi
 
 import tensorflow as tf
-from optfuncs import core
-from optfuncs import tensorflow_functions as tff
+from py_benchmark_functions import core
+from py_benchmark_functions.imp import tensorflow as tff
 
 from sarlopt.utils.functions.distributions import UniformFunctionDistribution
 

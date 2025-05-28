@@ -12,7 +12,7 @@ description = "Single-Agent Reinforcement Learning for Global Optimization."
 requires-python = ">=3.10"
 keywords = ["optimization", "tensorflow", "l2o", "learning to optimize", "reinformecement learning"]
 classifiers = ["Development Status :: 2 - Pre-Alpha", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12"]
-dependencies = ["py_benchmark_functions >= 0.2.2", "tensorflow >= 2.0.0", "tf-agents >= 0.4.0"]
+dependencies = ["py_benchmark_functions >= 0.2.2", "tensorflow >= 2.0.0", "tf-agents >= 0.4.0", "tensorflow-probability >= 0.10.0"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-timeout", "uv", "pre-commit"]

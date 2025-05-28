@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy.random import default_rng
-from optfuncs import core
+from py_benchmark_functions import core
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
@@ -34,7 +34,6 @@ class PyFunctionEnv(py_environment.PyEnvironment):
         super().__init__()
         self._seed = seed if seed else np.random.SeedSequence().generate_state(1)
         self._rng = default_rng(seed=self._seed)
-
         self.func = function
         self._dims = dims
 

@@ -4,11 +4,9 @@
 from math import pi
 
 import tensorflow as tf
-from optfuncs import core
-from optfuncs import tensorflow_functions as tff
-from tf_agents.policies import random_tf_policy
+from py_benchmark_functions import core
+from py_benchmark_functions.imp import tensorflow as tff
 from tf_agents.trajectories import time_step as ts
-from tf_agents.typing import types
 from tf_agents.utils import common
 
 from sarlopt.environments.tf_function_env_v3 import TFFunctionEnvV3

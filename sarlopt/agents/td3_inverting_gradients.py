@@ -8,7 +8,7 @@ by Fujimoto et al. (https://arxiv.org/abs/1802.09477)
 from typing import Optional, Text
 
 import gin
-import tensorflow as tf  # pylint: disable=g-explicit-tensorflow-version-import
+import tensorflow as tf
 import tensorflow_probability as tfp
 from tf_agents.agents import data_converter, tf_agent
 from tf_agents.agents.td3 import td3_agent

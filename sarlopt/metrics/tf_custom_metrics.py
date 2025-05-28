@@ -1,7 +1,7 @@
 """Custom TF Metrics."""
 
 import tensorflow as tf
-from optfuncs import core
+from py_benchmark_functions import core
 from tf_agents.metrics import tf_metric, tf_metrics
 from tf_agents.utils import common
 

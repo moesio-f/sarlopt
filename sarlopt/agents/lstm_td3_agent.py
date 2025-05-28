@@ -7,7 +7,7 @@ from tf_agents.agents import tf_agent
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
-from tf_agents.utils import common, eager_utils, nest_utils, object_identity
+from tf_agents.utils import common, eager_utils, object_identity
 
 from sarlopt.networks.lstm_td3_actor_network import (
     LSTMTD3ActorNetwork,
